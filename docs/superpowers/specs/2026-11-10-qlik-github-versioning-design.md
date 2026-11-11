@@ -46,7 +46,7 @@ Ablauf:
 2. Steht die Kopie hinter `main` zurück, meldet das Panel „Repository has N new commits“; **Update** bringt sie auf den Stand.
 3. Der Entwickler arbeitet in der Kopie und sichert mit **Save changes** auf den Branch.
 4. Der Branch wird auf GitHub per Pull Request nach `main` gemergt. Git führt dabei die Dateien zusammen; weil Kopien die Objekt-IDs der Quell-App behalten, passen die Dateien zueinander.
-5. Die Branch-App wird wie bisher in der QMC per „Publish and replace“ über die veröffentlichte App gelegt. Die Extension ist daran in v1 nicht beteiligt.
+5. Die Branch-App wird in der QMC per „Publish and replace“ über die veröffentlichte App gelegt. Die Extension ist daran in v1 nicht beteiligt.
 
 ## 3. Architektur
 
