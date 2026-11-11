@@ -37,7 +37,7 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 Die Arbeitsweise entspricht der heutigen mit gitoqlok:
 
 - Die **veröffentlichte App** im Stream ist der ausgelieferte Stand.
-- Der Branch **`main`** ist der gemergte Stand im Repo. Zu `main` gehört keine eigene App.
+- Der Branch **`main`** ist der gemergte Stand im Repo. Mit `main` ist nur die App verbunden, aus der das Repo angelegt wurde (6.2); danach entstehen Änderungen auf Branches, und `main` braucht keine eigene App.
 - Jede Änderung entsteht in einer **Kopie** der veröffentlichten App auf einem eigenen Branch.
 
 Ablauf:
