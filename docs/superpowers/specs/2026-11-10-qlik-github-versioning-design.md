@@ -1,6 +1,6 @@
 # Design: Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
-- **Datum:** 2026-11-11 (Revision 6)
+- **Datum:** 2026-11-11 (Revision 7)
 - **Status:** Entwurf zur Freigabe
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
 - **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
@@ -18,8 +18,8 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 | Repo-Organisation | Ein Repo pro App in der GitHub-Org `lr-bicc`, ein Branch pro App-Kopie (wie gitoqlok) |
 | Repo-Format | gitoqlok-Format (Abschnitt 4); bestehende gitoqlok-Repos bleiben nutzbar |
 | GitHub-Auth | Persönlicher Access Token (classic, Scope `repo`) pro Entwickler, eingetragen in der Optionsseite |
-| Funktionen v1 | Repo anlegen/verbinden, Branch anlegen, Save changes (Commit), Update (Repo-Stand in die App übernehmen, auch ältere Stände), Historie, Diff, Tags, Import (neue App aus Repo) |
-| Nicht in v1 | Pull Requests in der Extension anlegen oder mergen (nur Link nach GitHub), Publish App, Documentation Wizard, Qlik-Helper-Leiste, Apps-Manager, Qlik Cloud, QVF-Export, Reload-Tasks und Datenverbindungen, KI-Vorschlag für Commit-Nachrichten, Wiederherstellen von Bookmarks |
+| Funktionen v1 | Repo anlegen/verbinden, Branch anlegen, Save changes (Commit), Update (Repo-Stand in die App übernehmen, auch ältere Stände), Historie, Diff, Tags, Import (neue App aus Repo), Publish App (veröffentlichte App durch die Branch-App ersetzen) |
+| Nicht in v1 | Pull Requests in der Extension anlegen oder mergen (nur Link nach GitHub), Erstveröffentlichung einer App in einen Stream, Documentation Wizard, Qlik-Helper-Leiste, Apps-Manager, Qlik Cloud, QVF-Export, Reload-Tasks und Datenverbindungen, KI-Vorschlag für Commit-Nachrichten, Wiederherstellen von Bookmarks |
 | Umstieg | Das Team steigt vollständig von gitoqlok um; ein Parallelbetrieb auf denselben Repos wird nicht unterstützt. |
 | UI-Ansatz | Chrome Side Panel wie gitoqlok; Diffs als Overlay in der Qlik-Seite |
 | UI-Sprache | Durchgehend Englisch (Panel, Dialoge, Optionsseite, Fehlermeldungen), mit den Bezeichnungen aus gitoqlok („Local Changes“, „Save changes“, „Update“, „Create Branch“ …) |
@@ -27,20 +27,26 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 
 ### Erfolgskriterien
 1. **Kompatibilität:** Für die App eines bestehenden gitoqlok-Repos erzeugt die Extension die gepflegten Dateien (Abschnitt 4) inhaltsgleich zu gitoqlok, abgesehen von den dokumentierten Abweichungen (4.5).
-2. **Branch-Ablauf Ende zu Ende:** App duplizieren → Branch anlegen → ändern → Save changes → Pull Request auf GitHub mergen → Update in der Haupt-App. Danach entspricht die Haupt-App der Branch-App.
+2. **Ablauf Ende zu Ende:** Veröffentlichte App duplizieren → Branch anlegen → ändern → Save changes → Pull Request auf GitHub mergen → Publish App. Danach ergibt die Serialisierung der veröffentlichten App genau die Dateien des Default-Branches.
 3. **Kein Rauschen:** Eine frisch duplizierte App zeigt direkt nach dem Anlegen des Branches keine lokalen Änderungen, sofern die Quell-App keine hatte. Ein Reload der Daten allein erzeugt keine lokalen Änderungen.
 4. **Roundtrip:** App A serialisieren → per Import als neue App B anlegen → B serialisieren ergibt dieselben Dateien (Bookmarks ausgenommen). Getestet mit mindestens drei echten Apps (klein, mittel, groß).
 5. **Nichts geht verloren:** Vor jedem Update, das lokale Änderungen überschreibt, liegt der bisherige App-Stand als Sicherungs-Branch auf GitHub.
 
 ## 2. Arbeitsweise
 
-Wie bei gitoqlok gehört zu jedem Branch genau eine Qlik-App:
+Die Arbeitsweise entspricht der heutigen mit gitoqlok:
 
-1. Die Haupt-App gehört zum Branch `main` ihres Repos.
-2. Für eine Änderung dupliziert der Entwickler die App im Hub – auch eine veröffentlichte App aus einem Stream – und öffnet die Kopie. Die Extension erkennt, dass die Kopie von einer versionierten App stammt, und bietet **Create Branch** an.
+- Die **veröffentlichte App** im Stream ist der ausgelieferte Stand.
+- Der Branch **`main`** ist der gemergte Stand im Repo. Zu `main` gehört keine eigene App.
+- Jede Änderung entsteht in einer **Kopie** der veröffentlichten App auf einem eigenen Branch.
+
+Ablauf:
+
+1. Der Entwickler dupliziert die veröffentlichte App im Hub und öffnet die Kopie. Die Extension erkennt, dass die Kopie von einer versionierten App stammt, und bietet **Create Branch** an. Der Branch zweigt von `main` ab.
+2. Steht die Kopie hinter `main` zurück, meldet das Panel „Repository has N new commits“; **Update** bringt sie auf den Stand.
 3. Der Entwickler arbeitet in der Kopie und sichert mit **Save changes** auf den Branch.
-4. Der Branch wird auf GitHub per Pull Request nach `main` gemergt. Git führt dabei die Dateien zusammen; weil Kopien die Objekt-IDs der Haupt-App behalten, passen die Dateien zueinander.
-5. In der Haupt-App meldet die Extension „Repository has N new commits“. **Update** übernimmt den Stand in die App.
+4. Der Branch wird auf GitHub per Pull Request nach `main` gemergt. Git führt dabei die Dateien zusammen; weil Kopien die Objekt-IDs der Quell-App behalten, passen die Dateien zueinander.
+5. **Publish App** ersetzt die veröffentlichte App durch die Branch-App (Abschnitt 6.10).
 
 ## 3. Architektur
 
@@ -134,10 +140,11 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 ### In der App: Link-Objekt
 Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt vom Typ `git-link` an:
 ```json
-{ "repo": "lr-bicc/supply-chain-performance", "branch": "main", "appId": "<ID dieser App>", "syncedSha": "<Commit, auf dem die App steht>" }
+{ "repo": "lr-bicc/supply-chain-performance", "branch": "forecast-and-nordics", "appId": "<ID der App, die zuletzt gespeichert hat>", "syncedSha": "<Commit, auf dem die App steht>", "publishedAppId": "<ID der veröffentlichten App>" }
 ```
 - Das Objekt wird nicht versioniert.
 - Wird eine App dupliziert oder per „Publish and replace“ über eine andere App gelegt, wandert das Objekt mit. In der Kopie stimmt `appId` nicht mit der eigenen ID überein; daran erkennt die Extension „duplicated from an app tracked in <repo>“.
+- `publishedAppId` wird bei „Publish App“ gesetzt und wandert mit dem Inhalt in die veröffentlichte App und in deren Kopien. Er ist beim nächsten Veröffentlichen das vorgeschlagene Ziel.
 - `syncedSha` ist der Commit, auf dem die App steht: der letzte eigene Commit oder der Commit, auf den zuletzt aktualisiert wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD). Nach einem Update auf einen älteren Commit meldet das Panel deshalb wie gitoqlok „Repository has N new commits“.
 - gitoqlok arbeitet nach demselben Prinzip: Es legt in der App `gitoqlikMetadata` ab (Repo, letzter Commit, Zuordnung App-ID → Branch, ID der Master-App). Lässt sich dieser Eintrag lesen (Spike), übernimmt die Extension daraus Repo, Branch und letzten Commit in ihr eigenes Link-Objekt.
 - Lässt sich das Objekt nicht anlegen (veröffentlichte App, fehlende Rechte), liegen dieselben Angaben in `chrome.storage.local`; die Erkennung von Kopien entfällt dann.
@@ -147,16 +154,17 @@ Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik applicatio
 
 ### Auflösung beim Öffnen einer App
 1. Link-Objekt mit passender `appId` → verknüpft.
-2. Link-Objekt mit fremder `appId` → Kopie einer versionierten App (Ablauf 6.3).
-3. Kein Link-Objekt → `gitoqlikMetadata` der App, falls lesbar; sonst lokaler Cache, sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Treffer → Link-Objekt wird angelegt. So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
-4. Kein Treffer → „No linked repository“ (Ablauf 6.2).
+2. Link-Objekt mit fremder `appId` in einer unveröffentlichten App → Kopie einer versionierten App (Ablauf 6.3).
+3. Link-Objekt in einer veröffentlichten App → Nur-Lese-Ansicht: Repo, Branch und Commit, aus dem veröffentlicht wurde, sowie Abweichungen der App von diesem Commit. Änderungen sind hier nicht möglich; das Panel verweist auf das Duplizieren.
+4. Kein Link-Objekt → `gitoqlikMetadata` der App, falls lesbar; sonst lokaler Cache, sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Treffer → Link-Objekt wird angelegt. So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
+5. Kein Treffer → „No linked repository“ (Ablauf 6.2).
 
 Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (nach dem Merge gelöscht), meldet das Panel das und bietet **Create Branch** und **Connect to existing repository** an.
 
 ## 6. Abläufe
 
 ### 6.1 Aufbau des Side Panels
-- **Kopf:** App-Name; darunter Repo (`lr-bicc/<repo>`, Link nach GitHub), Branch-Badge, Hinweis „Repository has N new commits“, Symbole für „Unlink“ und „Refresh“.
+- **Kopf:** App-Name und Schaltfläche **Publish App**; darunter Repo (`lr-bicc/<repo>`, Link nach GitHub), Branch-Badge, Hinweis „Repository has N new commits“, Symbole für „Unlink“ und „Refresh“.
 - **Reiter:** Local Changes · History · Tags · Import
 - **Local Changes:** Commit-Auswahl + **Update** (mit Zähler neuer Commits und Aufklappmenü für die Teile), **Save changes**, darunter die Gruppen *Added objects*, *Deleted objects*, *Changed objects*, jeweils unterteilt nach Sheets, Master Items, Variables, Script, Attached files, mit Objekttitel und Link „details“.
 - **Commit-Auswahl:** aufklappbare, durchsuchbare Liste der Commits des Branches, neuester zuerst, je Eintrag Nachricht, Datum und Uhrzeit sowie Tag-Badges. Vorausgewählt ist der Branch-HEAD.
@@ -201,7 +209,7 @@ Ziel ist der Branch-HEAD oder ein in der Commit-Auswahl gewählter älterer Comm
 3. Hat die App lokale Änderungen, werden sie zuerst gesichert: Commit des aktuellen App-Stands mit Parent `syncedSha` auf einen neuen Branch `backup/<branch>-<JJJJMMTT-hhmm>`. Der Sicherungs-Branch lässt sich auf GitHub per Pull Request wieder einbringen oder per Update zurückholen.
 4. Aktionen ausführen, danach `DoSave`. Fortschritt in der Fußzeile; die Update-Schaltfläche zeigt am Ende „Success“. Geschrieben werden nur Objekte, die sich vom Zielstand unterscheiden.
 5. `syncedSha` = übernommener Commit, sofern er auf dem Branch liegt. Wurde nur ein Teil übernommen, erscheinen die übrigen Unterschiede als lokale Änderungen. Liegt das Ziel nicht auf dem Branch (Tag oder Sicherungs-Branch außerhalb), bleibt `syncedSha` unverändert, und der übernommene Stand erscheint insgesamt als lokale Änderung. Es gibt keinen automatischen Commit.
-6. Veröffentlichte Apps und Apps ohne Schreibrecht: Update ist gesperrt; stattdessen wird Import angeboten.
+6. Veröffentlichte Apps und Apps ohne Schreibrecht: Update ist gesperrt. Eine veröffentlichte App ändert sich nur über „Publish App“.
 
 ### 6.7 History und Diff
 - **History:** Commits des Branches (paginiert, 30 pro Seite) mit Autor, Datum, Nachricht, Tag-Badges. Aktionen: „Diff to previous“, „Diff to app“, „Add tag“, „Update app to this commit“.
@@ -213,6 +221,20 @@ Annotiertes Git-Tag auf einem Commit (Name + optionale Beschreibung). Der Name w
 
 ### 6.9 Import (neue App aus Repo)
 Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem Server des aktiven Tabs wird eine neue App „<App-Name> (<branch|tag|sha7>)“ angelegt, befüllt und gespeichert. Daten werden nicht geladen. Die neue App ist nicht verknüpft; beim Öffnen kann der Nutzer sie verbinden oder einen Branch für sie anlegen. So lassen sich Stände auf andere Server übertragen.
+
+### 6.10 Publish App
+Ersetzt eine veröffentlichte App durch die geöffnete Branch-App („Publish and replace“). Die veröffentlichte App behält ID, Stream und Namen.
+
+1. **Ziel:** vorgeschlagen wird die App aus `publishedAppId`. Fehlt der Eintrag oder gibt es die App nicht mehr, wählt der Nutzer aus der Liste der veröffentlichten Apps, die er ersetzen darf (filterbar, mit Stream).
+2. **Prüfungen vor dem Veröffentlichen.** Jede Abweichung wird im Dialog genannt; der Nutzer kann sie beheben oder mit „Publish anyway“ bewusst übergehen:
+   - Die App hat lokale Änderungen, die nicht gespeichert sind.
+   - Die App steht nicht auf dem HEAD ihres Branches.
+   - Der Stand des Branches entspricht nicht dem des Default-Branches (verglichen werden die Dateibäume beider HEADs). Das ist der Fall, wenn der Pull Request noch nicht gemergt ist oder `main` inzwischen Änderungen anderer enthält. Im zweiten Fall würde das Veröffentlichen deren ausgelieferte Arbeit überschreiben; der Dialog nennt den Weg: `main` auf GitHub in den Branch mergen, Update, dann veröffentlichen.
+3. **Bestätigung** mit Quell-App, Ziel-App, Stream und Commit.
+4. **Ausführung:** `publishedAppId` ins Link-Objekt schreiben, App speichern, dann QRS-Aufruf `PUT /qrs/app/{Quelle}/replace?app={Ziel}`.
+5. **Optional:** Häkchen „Tag this commit“ setzt ein Tag auf den veröffentlichten Commit (Name vorbelegt mit `published-<JJJJ-MM-TT>`). So lässt sich später nachsehen, welcher Stand wann ausgeliefert wurde.
+
+Die erstmalige Veröffentlichung einer App in einen Stream ist nicht Teil von v1; sie erfolgt wie bisher über Hub oder QMC.
 
 ## 7. Fehlerbehandlung
 
@@ -233,7 +255,8 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 | Fall | Verhalten |
 |---|---|
 | Keine/abgelaufene Sitzung, WebSocket geschlossen | Hinweis, sich in Qlik neu anzumelden bzw. die Seite neu zu laden |
-| Fehlende Schreibrechte | Update gesperrt, Import angeboten |
+| Fehlende Schreibrechte | Update gesperrt |
+| Kein Recht, die Ziel-App zu ersetzen, oder QRS lehnt ab | Meldung mit der Antwort des Servers; die Ziel-App bleibt unverändert |
 | Fehler mitten im Update | Stopp beim ersten Fehler; das Panel zeigt erledigte und offene Aktionen sowie die Engine-Meldung; `syncedSha` bleibt unverändert. Die App lässt sich per Update erneut auf den Zielstand oder auf den Sicherungs-Branch bringen. |
 | Zielstand enthält fehlerhafte Dateien (z. B. nach einem falsch gelösten Merge-Konflikt) | Update startet nicht; Liste der Dateien mit Link nach GitHub |
 | Branch der App existiert nicht mehr | Hinweis; „Create Branch“ und „Connect to existing repository“ (gitoqlok meldet hier nur „Error occurred during GIT request“) |
@@ -253,6 +276,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
   - `repo-layout`: Slug, Kollision, README erzeugen, Branch-Tabelle lesen und ergänzen (auch Tabellen, die gitoqlok geschrieben hat).
   - `diff`, `update-planner`, `git-hash`.
   - GitHub-Client mit gemocktem `fetch`: Commit-Ablauf, abgelehnter Fast-Forward, Branch anlegen, Fehlerzuordnung.
+- Prüfungen vor „Publish App“: lokale Änderungen, App hinter dem Branch, Branch ungleich Default-Branch.
 - **Abnahmetests gegen den Testserver** entlang der Erfolgskriterien 1 bis 5, als geführte Checkliste.
 - **Manuelle Checkliste** für Sonderfälle: veröffentlichte App, fehlende Rechte, abgelaufene Sitzung, abgebrochenes Update, geschützter Branch.
 - Automatisierte E2E-Tests (Playwright) sind für v1 nicht vorgesehen.
@@ -269,13 +293,15 @@ Mehrere Annahmen lassen sich nur am echten Server prüfen. Der erste Schritt des
 6. Übersteht eine Story mit Snapshots den Weg `GetFullPropertyTree` → `SetFullPropertyTree` in eine neue App ohne Daten?
 7. Bleiben die Daten einer App erhalten, wenn `DoSave` nach Objekt- und Skriptänderungen in der Sitzung des Nutzers aufgerufen wird?
 8. Lässt sich das Ladeskript einer veröffentlichten App mit den Rechten eines Entwicklers lesen?
-9. Wo legt gitoqlok `gitoqlikMetadata` in der App ab, und lässt es sich lesen?
-10. Liefert `/qps/csrftoken` ein Token, und in welcher Form erwartet es der Virtual Proxy?
+9. Darf ein Entwickler eine veröffentlichte App per QRS ersetzen (`/qrs/app/{id}/replace`), und wandert das Link-Objekt dabei mit?
+10. Wo legt gitoqlok `gitoqlikMetadata` in der App ab, und lässt es sich lesen?
+11. Liefert `/qps/csrftoken` ein Token, und in welcher Form erwartet es der Virtual Proxy?
 
 Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 
 ## 10. Offene Punkte außerhalb von v1
 - Wiederherstellen von Bookmarks
 - Pull Requests in der Extension anlegen
+- Erstveröffentlichung einer App in einen Stream
 - Verteilung (Chrome Web Store „nicht gelistet“ oder Gruppenrichtlinie)
 - Apps-Manager, Qlik Cloud
