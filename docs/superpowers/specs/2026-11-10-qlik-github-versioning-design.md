@@ -1,9 +1,9 @@
 # Design: Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
-- **Datum:** 2026-11-11 (Revision 5)
+- **Datum:** 2026-11-11 (Revision 6)
 - **Status:** Entwurf zur Freigabe
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
-- **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen)
+- **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
 
 ## 1. Ziel und Rahmen
 
@@ -22,13 +22,13 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 | Nicht in v1 | Pull Requests in der Extension anlegen oder mergen (nur Link nach GitHub), Publish App, Documentation Wizard, Qlik-Helper-Leiste, Apps-Manager, Qlik Cloud, QVF-Export, Reload-Tasks und Datenverbindungen, KI-Vorschlag für Commit-Nachrichten, Wiederherstellen von Bookmarks |
 | Umstieg | Das Team steigt vollständig von gitoqlok um; ein Parallelbetrieb auf denselben Repos wird nicht unterstützt. |
 | UI-Ansatz | Chrome Side Panel wie gitoqlok; Diffs als Overlay in der Qlik-Seite |
-| UI-Sprache | Englisch, mit den Bezeichnungen aus gitoqlok („Local Changes“, „Save changes“, „Update“, „Create Branch“ …) |
+| UI-Sprache | Durchgehend Englisch (Panel, Dialoge, Optionsseite, Fehlermeldungen), mit den Bezeichnungen aus gitoqlok („Local Changes“, „Save changes“, „Update“, „Create Branch“ …) |
 | Verteilung | Vorerst als entpackte Extension (Entwicklermodus) |
 
 ### Erfolgskriterien
 1. **Kompatibilität:** Für die App eines bestehenden gitoqlok-Repos erzeugt die Extension die gepflegten Dateien (Abschnitt 4) inhaltsgleich zu gitoqlok, abgesehen von den dokumentierten Abweichungen (4.5).
 2. **Branch-Ablauf Ende zu Ende:** App duplizieren → Branch anlegen → ändern → Save changes → Pull Request auf GitHub mergen → Update in der Haupt-App. Danach entspricht die Haupt-App der Branch-App.
-3. **Kein Rauschen:** Eine frisch duplizierte App zeigt direkt nach dem Anlegen des Branches keine lokalen Änderungen. Ein Reload der Daten allein erzeugt keine lokalen Änderungen.
+3. **Kein Rauschen:** Eine frisch duplizierte App zeigt direkt nach dem Anlegen des Branches keine lokalen Änderungen, sofern die Quell-App keine hatte. Ein Reload der Daten allein erzeugt keine lokalen Änderungen.
 4. **Roundtrip:** App A serialisieren → per Import als neue App B anlegen → B serialisieren ergibt dieselben Dateien (Bookmarks ausgenommen). Getestet mit mindestens drei echten Apps (klein, mittel, groß).
 5. **Nichts geht verloren:** Vor jedem Update, das lokale Änderungen überschreibt, liegt der bisherige App-Stand als Sicherungs-Branch auf GitHub.
 
@@ -58,6 +58,8 @@ Die Qlik Engine API (WebSocket) prüft den `Origin`-Header gegen die Host-Whitel
 
 **Engine-Zugriff aus dem Content Script:** Netzwerkzugriffe eines Content Scripts laufen unter dem Origin der Seite, also mit deren Cookie und einem Origin, den der Virtual Proxy akzeptiert. Der Spike (Abschnitt 9) bestätigt das für WebSockets; schlägt er fehl, wandert nur der Engine-Zugriff in ein Main-World-Skript.
 
+**CSRF-Token:** Vor dem Verbindungsaufbau fragt das Content Script `/<präfix>/qps/csrftoken` ab und hängt ein geliefertes Token als `qlik-csrf-token` an die WebSocket-URL und an QRS-Aufrufe an. Das gitoqlok-Log zeigt genau diesen Ablauf gegen den Testserver.
+
 **URLs:** WebSocket- und Datei-URLs werden aus der Tab-URL abgeleitet, inklusive Virtual-Proxy-Präfix (`https://<host>/<präfix>/sense/app/<id>` → `wss://<host>/<präfix>/app/<id>`; auf dem Testserver ist das Präfix `qs`).
 
 **Lebensdauer:** Chrome beendet einen untätigen Service Worker nach rund 30 Sekunden. Lange Abläufe (Lesen, Update) führt deshalb das Content Script aus und ruft den Service Worker nur für einzelne GitHub-Aufrufe. Der Stand eines laufenden Ablaufs liegt in `chrome.storage.session`. Wird der Tab während eines Updates geschlossen oder neu geladen, gilt das als Fehler mitten im Update (Abschnitt 7).
@@ -78,7 +80,7 @@ TypeScript, Manifest V3, Vite, enigma.js, GitHub REST API (Git Data API für ato
 
 ### Berechtigungen (Manifest)
 - `storage`, `scripting`, `sidePanel`
-- `host_permissions`: `https://api.github.com/*`
+- `host_permissions`: `https://api.github.com/*`, `https://codeload.github.com/*` (Ziel der Weiterleitung beim Abruf eines Repo-Stands als ZIP)
 - `optional_host_permissions`: `https://*/*` – angefragt wird zur Laufzeit nur für die in den Optionen eingetragenen Qlik-Server.
 
 ## 4. Repo-Format
@@ -137,6 +139,7 @@ Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt 
 - Das Objekt wird nicht versioniert.
 - Wird eine App dupliziert oder per „Publish and replace“ über eine andere App gelegt, wandert das Objekt mit. In der Kopie stimmt `appId` nicht mit der eigenen ID überein; daran erkennt die Extension „duplicated from an app tracked in <repo>“.
 - `syncedSha` ist der Commit, auf dem die App steht: der letzte eigene Commit oder der Commit, auf den zuletzt aktualisiert wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD). Nach einem Update auf einen älteren Commit meldet das Panel deshalb wie gitoqlok „Repository has N new commits“.
+- gitoqlok arbeitet nach demselben Prinzip: Es legt in der App `gitoqlikMetadata` ab (Repo, letzter Commit, Zuordnung App-ID → Branch, ID der Master-App). Lässt sich dieser Eintrag lesen (Spike), übernimmt die Extension daraus Repo, Branch und letzten Commit in ihr eigenes Link-Objekt.
 - Lässt sich das Objekt nicht anlegen (veröffentlichte App, fehlende Rechte), liegen dieselben Angaben in `chrome.storage.local`; die Erkennung von Kopien entfällt dann.
 
 ### Im Repo: Branch-Tabelle in README.md
@@ -145,7 +148,7 @@ Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik applicatio
 ### Auflösung beim Öffnen einer App
 1. Link-Objekt mit passender `appId` → verknüpft.
 2. Link-Objekt mit fremder `appId` → Kopie einer versionierten App (Ablauf 6.3).
-3. Kein Link-Objekt → lokaler Cache, sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Treffer → Link-Objekt wird angelegt. So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
+3. Kein Link-Objekt → `gitoqlikMetadata` der App, falls lesbar; sonst lokaler Cache, sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Treffer → Link-Objekt wird angelegt. So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
 4. Kein Treffer → „No linked repository“ (Ablauf 6.2).
 
 Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (nach dem Merge gelöscht), meldet das Panel das und bietet **Create Branch** und **Connect to existing repository** an.
@@ -158,7 +161,7 @@ Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (na
 - **Local Changes:** Commit-Auswahl + **Update** (mit Zähler neuer Commits und Aufklappmenü für die Teile), **Save changes**, darunter die Gruppen *Added objects*, *Deleted objects*, *Changed objects*, jeweils unterteilt nach Sheets, Master Items, Variables, Script, Attached files, mit Objekttitel und Link „details“.
 - **Commit-Auswahl:** aufklappbare, durchsuchbare Liste der Commits des Branches, neuester zuerst, je Eintrag Nachricht, Datum und Uhrzeit sowie Tag-Badges. Vorausgewählt ist der Branch-HEAD.
 - **Fußzeile:** Status („Ready“, „Loading application data…“, Fortschritt).
-- Repo-Daten werden pro Branch zwischengespeichert; „Refresh“ lädt sie neu.
+- Repo-Daten werden pro Branch zwischengespeichert; „Refresh“ lädt sie neu. Die lokalen Änderungen werden beim Öffnen des Panels, bei „Refresh“ und nach jedem Commit oder Update neu ermittelt; eine laufende Überwachung der App im Hintergrund wie bei gitoqlok gibt es in v1 nicht.
 
 ### 6.2 App ohne Repo
 Das Panel zeigt „No linked repository“ mit zwei Aktionen:
@@ -171,7 +174,8 @@ Das Panel meldet „We found a repository for the master Qlik application, from 
 Create Branch:
 - Feld „Branch Name“, vorbelegt mit dem Qlik-Benutzernamen (z. B. `r.vasilev`); der Name wird gegen die Git-Regeln geprüft.
 - Option „Branch off from the branch that is used in the app you are duplicating from“ mit Anzeige dieses Branches. Ohne Option wird vom Default-Branch abgezweigt. Existiert der Branch der Quell-App nicht mehr, wird die Option nicht angeboten.
-- Ablauf: Zeile in der Branch-Tabelle committen → Branch auf diesen Commit anlegen → Link-Objekt der Kopie auf den neuen Branch und die eigene App-ID setzen, `syncedSha` = Branch-HEAD.
+- Ablauf: Zeile in der Branch-Tabelle committen → Branch auf diesen Commit anlegen → Link-Objekt der Kopie auf den neuen Branch und die eigene App-ID setzen.
+- **`syncedSha` der Kopie:** Die Kopie steht auf dem Stand ihrer Quell-App, nicht zwingend auf dem des neuen Branches. Liegt der `syncedSha` aus dem mitkopierten Link-Objekt in der Historie des neuen Branches, bleibt er erhalten; das Panel zeigt dann wie gitoqlok „Repository has N new commits“, und ein Update holt sie in die Kopie. Nur so dreht ein späterer Commit aus der Kopie keine Änderungen zurück, die inzwischen gemergt wurden. Liegt er nicht in der Historie oder fehlt er, wird `syncedSha` auf den Branch-HEAD gesetzt, und Unterschiede erscheinen als lokale Änderungen.
 - Existiert der Branch-Name bereits → Fehlermeldung, nichts wird geändert.
 
 ### 6.4 Local Changes
@@ -192,7 +196,7 @@ Autor ist der GitHub-Account des Token-Inhabers.
 ### 6.6 Update (Repo-Stand in die App übernehmen)
 Ziel ist der Branch-HEAD oder ein in der Commit-Auswahl gewählter älterer Commit oder Tag. Über das Aufklappmenü lassen sich die Teile wählen: Load script, App Objects, Attached files (Default: alle).
 
-1. Der Zielstand wird geladen und vollständig geprüft, bevor die App angefasst wird: jede JSON-Datei muss sich lesen lassen, keine Datei darf Konfliktmarken (`<<<<<<<`) enthalten, und `tab_order.txt` muss zu den Tab-Dateien passen. Bei Fehlern bricht das Update mit der Liste der betroffenen Dateien ab. Danach erzeugt `update-planner` die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
+1. Der Zielstand wird als ZIP in einem Aufruf geladen (`zipball/<commit>`) und vollständig geprüft, bevor die App angefasst wird: jede JSON-Datei muss sich lesen lassen, keine Datei darf Konfliktmarken (`<<<<<<<`) enthalten, und `tab_order.txt` muss zu den Tab-Dateien passen. Bei Fehlern bricht das Update mit der Liste der betroffenen Dateien ab. Danach erzeugt `update-planner` die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
 2. Bestätigungsdialog „Update Application from the repository?“ mit dem gewählten Commit (Link nach GitHub), der Vorschau „X anlegen, Y ändern, Z löschen“ mit aufklappbarer Liste und den Schaltflächen **Update** und **Cancel**.
 3. Hat die App lokale Änderungen, werden sie zuerst gesichert: Commit des aktuellen App-Stands mit Parent `syncedSha` auf einen neuen Branch `backup/<branch>-<JJJJMMTT-hhmm>`. Der Sicherungs-Branch lässt sich auf GitHub per Pull Request wieder einbringen oder per Update zurückholen.
 4. Aktionen ausführen, danach `DoSave`. Fortschritt in der Fußzeile; die Update-Schaltfläche zeigt am Ende „Success“. Geschrieben werden nur Objekte, die sich vom Zielstand unterscheiden.
@@ -232,7 +236,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 | Fehlende Schreibrechte | Update gesperrt, Import angeboten |
 | Fehler mitten im Update | Stopp beim ersten Fehler; das Panel zeigt erledigte und offene Aktionen sowie die Engine-Meldung; `syncedSha` bleibt unverändert. Die App lässt sich per Update erneut auf den Zielstand oder auf den Sicherungs-Branch bringen. |
 | Zielstand enthält fehlerhafte Dateien (z. B. nach einem falsch gelösten Merge-Konflikt) | Update startet nicht; Liste der Dateien mit Link nach GitHub |
-| Branch der App existiert nicht mehr | Hinweis; „Create Branch“ und „Connect to existing repository“ |
+| Branch der App existiert nicht mehr | Hinweis; „Create Branch“ und „Connect to existing repository“ (gitoqlok meldet hier nur „Error occurred during GIT request“) |
 | Server nicht in den Optionen eingetragen | Hinweis mit „Add server“ (fragt Host-Berechtigung an) |
 
 ### Sicherheit
@@ -265,6 +269,8 @@ Mehrere Annahmen lassen sich nur am echten Server prüfen. Der erste Schritt des
 6. Übersteht eine Story mit Snapshots den Weg `GetFullPropertyTree` → `SetFullPropertyTree` in eine neue App ohne Daten?
 7. Bleiben die Daten einer App erhalten, wenn `DoSave` nach Objekt- und Skriptänderungen in der Sitzung des Nutzers aufgerufen wird?
 8. Lässt sich das Ladeskript einer veröffentlichten App mit den Rechten eines Entwicklers lesen?
+9. Wo legt gitoqlok `gitoqlikMetadata` in der App ab, und lässt es sich lesen?
+10. Liefert `/qps/csrftoken` ein Token, und in welcher Form erwartet es der Virtual Proxy?
 
 Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 
