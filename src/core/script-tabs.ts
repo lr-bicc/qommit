@@ -31,7 +31,8 @@ export function joinScript(tabs: ScriptTab[], eol: "\r\n" | "\n"): string {
 }
 
 function tabFileBase(name: string): string {
-  return name.replace(/[\\/:*?"<>|]/g, " ");
+  const sanitized = name.replace(/[\\/:*?"<>|]/g, " ");
+  return sanitized.trim() === "" ? "Tab" : sanitized; // an empty file name would lose the tab
 }
 
 export function scriptToFiles(script: string): Map<string, string> {
@@ -54,6 +55,11 @@ function asText(content: FileContent): string {
   return typeof content === "string" ? content : new TextDecoder("utf-8").decode(content);
 }
 
+/**
+ * Restores the script from tab files. The line ending is taken from the first tab file that
+ * contains a line break; if none does, tabs are joined with CRLF (Qlik's native line ending).
+ * The repo format cannot carry the EOL, so that case is the one lossy exception for LF scripts.
+ */
 export function filesToScript(files: Map<string, FileContent>): string {
   const order = files.get(TAB_ORDER_PATH);
   if (order === undefined) return "";

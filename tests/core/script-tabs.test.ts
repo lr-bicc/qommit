@@ -46,3 +46,19 @@ test("decodes Uint8Array tab files as UTF-8", () => {
   ]);
   expect(filesToScript(files)).toBe("///$tab Main\r\nSET a='ä';");
 });
+test("documented exception to the lossless round trip: LF script without any line break inside a tab is restored with CRLF", () => {
+  expect(filesToScript(scriptToFiles("///$tab A\n///$tab B"))).toBe("///$tab A\r\n///$tab B");
+});
+test("an empty tab name gets the file name Tab and round-trips exactly", () => {
+  const s = "///$tab \r\nSET a=1;";
+  const files = scriptToFiles(s);
+  expect(files.has("data_load_script/Tab.qvs")).toBe(true);
+  expect(files.get(TAB_ORDER_PATH)).toBe("Tab");
+  expect(filesToScript(files)).toBe(s);
+});
+test("several tabs with empty or whitespace-only file names are numbered", () => {
+  const s = "///$tab \r\n1;\r\n///$tab ???\r\n2;";
+  const files = scriptToFiles(s);
+  expect(files.get(TAB_ORDER_PATH)).toBe("Tab%tab_file_order_divider%Tab (2)");
+  expect(filesToScript(files)).toBe(s);
+});
