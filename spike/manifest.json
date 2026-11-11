@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Qlik Git Spike",
+  "version": "0.0.1",
+  "description": "Throwaway spike: runs feasibility probes against the Qlik Sense test server and downloads a JSON report.",
+  "content_scripts": [
+    {
+      "matches": ["https://lr-analytics-test.lrworld.com/*"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
