@@ -1,9 +1,9 @@
 # Design: Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
-- **Datum:** 2026-11-11 (Revision 4)
+- **Datum:** 2026-11-11 (Revision 5)
 - **Status:** Entwurf zur Freigabe
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
-- **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und drei Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update)
+- **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen)
 
 ## 1. Ziel und Rahmen
 
@@ -37,7 +37,7 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 Wie bei gitoqlok gehört zu jedem Branch genau eine Qlik-App:
 
 1. Die Haupt-App gehört zum Branch `main` ihres Repos.
-2. Für eine Änderung dupliziert der Entwickler die App im Hub und öffnet die Kopie. Die Extension erkennt, dass die Kopie von einer versionierten App stammt, und bietet **Create Branch** an.
+2. Für eine Änderung dupliziert der Entwickler die App im Hub – auch eine veröffentlichte App aus einem Stream – und öffnet die Kopie. Die Extension erkennt, dass die Kopie von einer versionierten App stammt, und bietet **Create Branch** an.
 3. Der Entwickler arbeitet in der Kopie und sichert mit **Save changes** auf den Branch.
 4. Der Branch wird auf GitHub per Pull Request nach `main` gemergt. Git führt dabei die Dateien zusammen; weil Kopien die Objekt-IDs der Haupt-App behalten, passen die Dateien zueinander.
 5. In der Haupt-App meldet die Extension „Repository has N new commits“. **Update** übernimmt den Stand in die App.
@@ -89,7 +89,6 @@ Repo-Name = App-Name als Slug (Kleinbuchstaben, Umlaute transliteriert, alles au
 ### 4.2 Dateistruktur (wie gitoqlok)
 ```
 README.md                         Titel, Ersteller, Sheet-Tabelle, Branch-Tabelle
-loadScript.qvs                    komplettes Ladeskript
 data_load_script/<Tab>.qvs        eine Datei pro Skript-Tab
 data_load_script/tab_order.txt    Reihenfolge der Tabs
 objects/appprops.json             App-Eigenschaften
@@ -104,10 +103,10 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 ```
 
 ### 4.3 Serialisierungsregeln
-- **JSON:** 2 Leerzeichen Einrückung, Schlüssel in der Reihenfolge der Engine, Zeilenenden `\n`, kein abschließender Zeilenumbruch. Variablen, Dimensionen und Measures sind die Eigenschaften des Objekts (`GetProperties`); Sheets, Master-Visualisierungen und Stories sind `{ "qProperty": …, "qChildren": [...] }` (`GetFullPropertyTree`); `appprops.json` ist ein Array solcher Bäume.
+- **JSON:** 2 Leerzeichen Einrückung, Schlüssel in der Reihenfolge der Engine, Zeilenenden `\n`, kein abschließender Zeilenumbruch. Variablen, Dimensionen und Measures sind die Eigenschaften des Objekts (`GetProperties`); Sheets, Master-Visualisierungen und Stories sind `{ "qProperty": …, "qChildren": [...] }` (`GetFullPropertyTree`); `appprops.json` ist ein Array solcher Bäume. Kindobjekte eines Sheets stehen in der Reihenfolge der Engine; erweist sie sich im Spike als nicht stabil, werden sie nach `qId` sortiert.
 - **Objekt-IDs** (`qInfo.qId`) sind Dateiname und bleiben erhalten. Sie werden bei Update und Import wiederverwendet; nur so bleiben Verweise gültig, etwa von einer Visualisierung auf ein Master Item, und nur so lassen sich Branches mergen.
-- **Ladeskript:** `loadScript.qvs` enthält das Skript unverändert, inklusive Zeilenenden. Die Tab-Dateien entstehen durch Teilen an den Zeilen `///$tab <Name>`; Dateiname ist der Tab-Name, in dem für Dateinamen ungültige Zeichen durch Leerzeichen ersetzt sind. `tab_order.txt` enthält die Namen in Reihenfolge, getrennt durch `%tab_file_order_divider%`. Maßgeblich beim Update ist `loadScript.qvs`; weichen die Tab-Dateien davon ab (etwa nach einem von Hand gelösten Merge-Konflikt), warnt die Extension vor dem Update.
-- **App-ID in Datei-URLs:** Verweise der Form `/appcontent/<App-ID>/<Datei>` enthalten die ID der jeweiligen App. Beim Schreiben ins Repo wird die ID durch die der `main`-App ersetzt, beim Übernehmen in eine App durch deren eigene ID. Ohne diese Regel ändert jeder Branch-Wechsel alle Sheets mit Bildern.
+- **Ladeskript:** Das Skript liegt nur in den Tab-Dateien. Sie entstehen durch Teilen an den Zeilen `///$tab <Name>`, Zeilenenden bleiben unverändert; Dateiname ist der Tab-Name, in dem für Dateinamen ungültige Zeichen durch Leerzeichen ersetzt sind. `tab_order.txt` enthält die Namen in Reihenfolge, getrennt durch `%tab_file_order_divider%`. Beim Update wird das Skript aus `tab_order.txt` und den Tab-Dateien zusammengesetzt.
+- **App-ID in Datei-URLs:** Verweise der Form `/appcontent/<App-ID>/<Datei>` enthalten die ID der jeweiligen App. Beim Schreiben ins Repo wird die ID durch die ersetzt, die in der Branch-Tabelle beim Default-Branch steht (sie dient nur als feste Marke, die App muss nicht mehr existieren), beim Übernehmen in eine App durch deren eigene ID. Ohne diese Regel ändert jeder Branch-Wechsel alle Sheets mit Bildern.
 - **README.md** wird beim Anlegen des Repos erzeugt (Titel, Ersteller, Datum, Tabelle der Sheets, Branch-Tabelle). Danach ändert die Extension nur noch die Branch-Tabelle.
 
 ### 4.4 Was nicht oder nur eingeschränkt versioniert wird
@@ -123,9 +122,10 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 | Im Ladeskript erzeugte Variablen (`qIsScriptCreated`) werden nicht versioniert. | Sie stehen bereits im Skript und ändern sich bei jedem Reload (`vU.Today`, `Qvc.Global.v.ScriptStart` …). Im Referenz-Repo betreffen alle 190 Variablenänderungen der letzten 60 Commits solche Variablen. |
 | App-IDs in Datei-URLs werden normalisiert (4.3). | Im Referenz-Repo steht dort die ID der zuletzt committenden Branch-App; eine frische Kopie zeigt deshalb sofort 11 geänderte Sheets. |
 | `objects/fields.json`, `objects/themes.json`, `objects/glossarylinks.json` werden nicht gepflegt. | Abgeleitete Daten, die sich nicht in eine App zurückschreiben lassen. |
+| `loadScript.qvs` (das zusammengefügte Gesamtskript) wird nicht geschrieben. | Jede Skriptänderung stünde sonst doppelt im Repo, und jeder Merge-Konflikt im Skript müsste zweimal gleich gelöst werden. gitoqlok bietet dasselbe als Einstellung an („Do not commit full loadScript.qvs file“). |
 | Commit-Nachrichten erhalten keinen Zusatz wie `[%_OBJECTS_%%_SCRIPT_%]`. | Der Zusatz ist für die Extension nicht nötig. |
 
-**Bestehende gitoqlok-Repos:** Der erste „Save changes“ mit der Extension entfernt einmalig die Dateien skripterzeugter Variablen und schreibt die normalisierten Datei-URLs. Liegen im Repo nicht mehr gepflegte Dateien (`fields.json`, `themes.json`, `glossarylinks.json`, `builds/`), zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt); die Dateien bleiben in der Git-Historie erhalten.
+**Bestehende gitoqlok-Repos:** Der erste „Save changes“ mit der Extension entfernt einmalig die Dateien skripterzeugter Variablen und schreibt die normalisierten Datei-URLs. Liegen im Repo nicht mehr gepflegte Dateien (`loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json`, `builds/`), zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt); die Dateien bleiben in der Git-Historie erhalten.
 
 ## 5. Verknüpfung App ↔ Repo ↔ Branch
 
@@ -135,18 +135,20 @@ Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt 
 { "repo": "lr-bicc/supply-chain-performance", "branch": "main", "appId": "<ID dieser App>", "syncedSha": "<Commit, auf dem die App steht>" }
 ```
 - Das Objekt wird nicht versioniert.
-- Wird eine App dupliziert, wandert das Objekt mit. In der Kopie stimmt `appId` nicht mit der eigenen ID überein; daran erkennt die Extension „duplicated from an app tracked in <repo>“.
+- Wird eine App dupliziert oder per „Publish and replace“ über eine andere App gelegt, wandert das Objekt mit. In der Kopie stimmt `appId` nicht mit der eigenen ID überein; daran erkennt die Extension „duplicated from an app tracked in <repo>“.
 - `syncedSha` ist der Commit, auf dem die App steht: der letzte eigene Commit oder der Commit, auf den zuletzt aktualisiert wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD). Nach einem Update auf einen älteren Commit meldet das Panel deshalb wie gitoqlok „Repository has N new commits“.
 - Lässt sich das Objekt nicht anlegen (veröffentlichte App, fehlende Rechte), liegen dieselben Angaben in `chrome.storage.local`; die Erkennung von Kopien entfällt dann.
 
 ### Im Repo: Branch-Tabelle in README.md
-Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik application` mit der URL der App je Branch. Die Extension ergänzt beim Anlegen eines Branches eine Zeile (Commit „Update branches table“ auf dem Default-Branch; ist dieser geschützt, auf dem neuen Branch).
+Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik application` mit der URL der App je Branch. Die Extension ergänzt beim Anlegen eines Branches eine Zeile (Commit „Update branches table“ auf dem Default-Branch; ist dieser geschützt, auf dem neuen Branch). Pro Branch-Name gibt es genau eine Zeile; eine vorhandene Zeile gleichen Namens wird ersetzt.
 
 ### Auflösung beim Öffnen einer App
 1. Link-Objekt mit passender `appId` → verknüpft.
 2. Link-Objekt mit fremder `appId` → Kopie einer versionierten App (Ablauf 6.3).
 3. Kein Link-Objekt → lokaler Cache, sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Treffer → Link-Objekt wird angelegt. So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
 4. Kein Treffer → „No linked repository“ (Ablauf 6.2).
+
+Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (nach dem Merge gelöscht), meldet das Panel das und bietet **Create Branch** und **Connect to existing repository** an.
 
 ## 6. Abläufe
 
@@ -161,14 +163,14 @@ Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik applicatio
 ### 6.2 App ohne Repo
 Das Panel zeigt „No linked repository“ mit zwei Aktionen:
 - **Create repository:** legt das Repo an (4.1), erzeugt `README.md`, committet den App-Stand als ersten Commit auf `main` und legt das Link-Objekt an.
-- **Connect to existing repository:** Auswahl eines Repos der Org und eines Branches; die App wird diesem Branch zugeordnet (Link-Objekt, Zeile in der Branch-Tabelle). `syncedSha` wird auf den Branch-HEAD gesetzt; Unterschiede erscheinen als lokale Änderungen.
+- **Connect to existing repository:** Dialog wie bei gitoqlok mit filterbarer Repo-Liste der Org und der Wahl „As a new branch“ (Name vorbelegt mit dem Qlik-Benutzernamen, abgezweigt vom Default-Branch) oder „To existing branch“ (Auswahlliste). Die App wird dem Branch zugeordnet (Link-Objekt, Zeile in der Branch-Tabelle). `syncedSha` wird auf den Branch-HEAD gesetzt; Unterschiede erscheinen als lokale Änderungen.
 
 ### 6.3 Kopie einer versionierten App: Create Branch
 Das Panel meldet „We found a repository for the master Qlik application, from which current application was duplicated“ und bietet **Create Branch**, **Unlink Repository** und **Connect to existing repository** an.
 
 Create Branch:
 - Feld „Branch Name“, vorbelegt mit dem Qlik-Benutzernamen (z. B. `r.vasilev`); der Name wird gegen die Git-Regeln geprüft.
-- Option „Branch off from the branch that is used in the app you are duplicating from“ mit Anzeige dieses Branches. Ohne Option wird vom Default-Branch abgezweigt.
+- Option „Branch off from the branch that is used in the app you are duplicating from“ mit Anzeige dieses Branches. Ohne Option wird vom Default-Branch abgezweigt. Existiert der Branch der Quell-App nicht mehr, wird die Option nicht angeboten.
 - Ablauf: Zeile in der Branch-Tabelle committen → Branch auf diesen Commit anlegen → Link-Objekt der Kopie auf den neuen Branch und die eigene App-ID setzen, `syncedSha` = Branch-HEAD.
 - Existiert der Branch-Name bereits → Fehlermeldung, nichts wird geändert.
 
@@ -190,7 +192,7 @@ Autor ist der GitHub-Account des Token-Inhabers.
 ### 6.6 Update (Repo-Stand in die App übernehmen)
 Ziel ist der Branch-HEAD oder ein in der Commit-Auswahl gewählter älterer Commit oder Tag. Über das Aufklappmenü lassen sich die Teile wählen: Load script, App Objects, Attached files (Default: alle).
 
-1. `update-planner` erzeugt die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
+1. Der Zielstand wird geladen und vollständig geprüft, bevor die App angefasst wird: jede JSON-Datei muss sich lesen lassen, keine Datei darf Konfliktmarken (`<<<<<<<`) enthalten, und `tab_order.txt` muss zu den Tab-Dateien passen. Bei Fehlern bricht das Update mit der Liste der betroffenen Dateien ab. Danach erzeugt `update-planner` die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
 2. Bestätigungsdialog „Update Application from the repository?“ mit dem gewählten Commit (Link nach GitHub), der Vorschau „X anlegen, Y ändern, Z löschen“ mit aufklappbarer Liste und den Schaltflächen **Update** und **Cancel**.
 3. Hat die App lokale Änderungen, werden sie zuerst gesichert: Commit des aktuellen App-Stands mit Parent `syncedSha` auf einen neuen Branch `backup/<branch>-<JJJJMMTT-hhmm>`. Der Sicherungs-Branch lässt sich auf GitHub per Pull Request wieder einbringen oder per Update zurückholen.
 4. Aktionen ausführen, danach `DoSave`. Fortschritt in der Fußzeile; die Update-Schaltfläche zeigt am Ende „Success“. Geschrieben werden nur Objekte, die sich vom Zielstand unterscheiden.
@@ -229,7 +231,8 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 | Keine/abgelaufene Sitzung, WebSocket geschlossen | Hinweis, sich in Qlik neu anzumelden bzw. die Seite neu zu laden |
 | Fehlende Schreibrechte | Update gesperrt, Import angeboten |
 | Fehler mitten im Update | Stopp beim ersten Fehler; das Panel zeigt erledigte und offene Aktionen sowie die Engine-Meldung; `syncedSha` bleibt unverändert. Die App lässt sich per Update erneut auf den Zielstand oder auf den Sicherungs-Branch bringen. |
-| Tab-Dateien weichen von `loadScript.qvs` ab | Warnung vor dem Update, `loadScript.qvs` gilt |
+| Zielstand enthält fehlerhafte Dateien (z. B. nach einem falsch gelösten Merge-Konflikt) | Update startet nicht; Liste der Dateien mit Link nach GitHub |
+| Branch der App existiert nicht mehr | Hinweis; „Create Branch“ und „Connect to existing repository“ |
 | Server nicht in den Optionen eingetragen | Hinweis mit „Add server“ (fragt Host-Berechtigung an) |
 
 ### Sicherheit
@@ -242,6 +245,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 - **Unit-Tests (Vitest)** für alle Logikmodule:
   - `serializer`/`deserializer`: synthetische Fixtures nach der Struktur des Referenz-Repos; gleicher Input → byte-gleicher Output; Normalisierung der Datei-URLs in beide Richtungen; Ausschluss skripterzeugter Variablen.
   - `script-tabs`: Teilen und Zusammensetzen ergibt das Original, inklusive Tab-Namen mit Sonderzeichen.
+  - Prüfung des Zielstands: kaputtes JSON, Konfliktmarken, fehlende Tab-Datei.
   - `repo-layout`: Slug, Kollision, README erzeugen, Branch-Tabelle lesen und ergänzen (auch Tabellen, die gitoqlok geschrieben hat).
   - `diff`, `update-planner`, `git-hash`.
   - GitHub-Client mit gemocktem `fetch`: Commit-Ablauf, abgelehnter Fast-Forward, Branch anlegen, Fehlerzuordnung.
