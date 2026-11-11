@@ -44,6 +44,7 @@ export interface SpikeReport {
   server: string;
   virtualProxyPrefix: string;
   appId: string;
+  includeDoSave: boolean;
   startedAt: string;
   finishedAt: string;
   probes: ProbeResult[];
@@ -79,7 +80,17 @@ interface ProbeDef {
   question: string;
   timeoutMs: number;
   needsEngine: boolean;
-  run(ctx: Context, ev: Evidence): Promise<{ ok: boolean; detail: string }>;
+  run(ctx: Context, ev: Evidence, cancel: CancelToken): Promise<{ ok: boolean; detail: string }>;
+}
+
+/** Set by the runner when a probe times out, so the probe stops starting new work. */
+interface CancelToken {
+  cancelled: boolean;
+}
+
+export interface RunOptions {
+  /** Run P7 (DoSave). Off by default so a run can check persistence without saving. */
+  includeDoSave: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +617,7 @@ const P2: ProbeDef = {
   question: "Does the engine keep a given qInfo.qId on CreateDimension, CreateMeasure and CreateObject (masterobject, sheet)?",
   timeoutMs: 120_000,
   needsEngine: true,
-  async run(ctx, ev) {
+  async run(ctx, ev, cancel) {
     const doc = requireDoc(ctx);
     type Kind = "dimension" | "measure" | "masterobject" | "sheet";
     const specs: { kind: Kind; id: string; create: () => Promise<EngineApi>; get: () => Promise<EngineApi>; destroy: () => Promise<unknown> }[] = [
@@ -667,7 +678,9 @@ const P2: ProbeDef = {
 
     const perType: Record<string, unknown> = {};
     let allKept = true;
+    const cleanupFailures: string[] = [];
     for (const s of specs) {
+      if (cancel.cancelled) break; // probe timed out: do not create anything further
       const r: Record<string, unknown> = { requestedId: s.id };
       perType[s.kind] = r;
       // Remove leftovers of an earlier, interrupted run.
@@ -692,13 +705,18 @@ const P2: ProbeDef = {
         // Always attempt cleanup, also when create/read-back failed or timed out midway.
         try {
           r.destroyed = await step(s.destroy(), `Destroy ${s.kind}`);
+          if (r.destroyed !== true) cleanupFailures.push(`${s.id} (qSuccess=${String(r.destroyed)})`);
         } catch (e) {
           r.destroyError = describeError(e);
+          cleanupFailures.push(`${s.id} (${r.destroyError})`);
         }
       }
     }
     ev.perType = perType;
-    return { ok: allKept, detail: allKept ? "all four types kept the given qId" : "at least one type did not keep the qId or failed (see evidence)" };
+    ev.cleanupFailures = cleanupFailures;
+    const parts = [allKept ? "all four types kept the given qId" : "at least one type did not keep the qId or failed (see evidence)"];
+    if (cleanupFailures.length) parts.push(`cleanup FAILED for ${cleanupFailures.join(", ")}`);
+    return { ok: allKept && cleanupFailures.length === 0, detail: parts.join("; ") };
   },
 };
 
@@ -838,8 +856,11 @@ const P7: ProbeDef = {
     const after = await rows("after");
     ev.tablesAfter = after.tables;
     ev.rowsAfter = after.rows;
-    const ok = ev.doSave === "ok" && before.rows === after.rows;
-    return { ok, detail: `DoSave ${String(ev.doSave)}; rows before ${before.rows}, after ${after.rows}` };
+    const ok = ev.doSave === "ok" && before.tables > 0 && before.rows === after.rows;
+    return {
+      ok,
+      detail: `DoSave ${String(ev.doSave)}; tables before ${before.tables}, after ${after.tables}; rows before ${before.rows}, after ${after.rows}${before.tables === 0 ? " (no tables: data question not answerable)" : ""}`,
+    };
   },
 };
 
@@ -849,11 +870,12 @@ const PROBES: ProbeDef[] = [P11, P1, P4, P6, P10, P8, P2, P5, P3, P7];
 // ---------------------------------------------------------------------------
 // Runner
 
-export async function runProbes(loc: AppLocation, onProgress: (text: string) => void): Promise<SpikeReport> {
+export async function runProbes(loc: AppLocation, onProgress: (text: string) => void, options: RunOptions): Promise<SpikeReport> {
   const report: SpikeReport = {
     server: loc.host,
     virtualProxyPrefix: loc.prefix,
     appId: loc.appId,
+    includeDoSave: options.includeDoSave,
     startedAt: new Date().toISOString(),
     finishedAt: "",
     probes: [],
@@ -875,14 +897,18 @@ export async function runProbes(loc: AppLocation, onProgress: (text: string) => 
     const started = Date.now();
     let ok = false;
     let detail = "";
-    if (probe.needsEngine && ctx.engineUnavailable) {
+    if (probe.id === "P7" && !options.includeDoSave) {
+      detail = "skipped: DoSave probe not selected";
+    } else if (probe.needsEngine && ctx.engineUnavailable) {
       detail = `skipped: ${ctx.engineUnavailable}`;
     } else {
+      const cancel: CancelToken = { cancelled: false };
       try {
-        const r = await withTimeout(probe.run(ctx, ev), probe.timeoutMs, probe.id);
+        const r = await withTimeout(probe.run(ctx, ev, cancel), probe.timeoutMs, probe.id);
         ok = r.ok;
         detail = r.detail;
       } catch (e) {
+        cancel.cancelled = true;
         detail = `${e instanceof TimeoutError ? "timeout" : "error"}: ${describeError(e)}`;
       }
     }

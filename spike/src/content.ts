@@ -2,8 +2,9 @@
 // runs the probes and downloads the JSON report.
 import { parseAppLocation, runProbes, type SpikeReport } from "./probes";
 
-const BUTTON_ID = "qlik-git-spike-button";
+const CONTAINER_ID = "qlik-git-spike";
 const LABEL = "Run spike probes";
+const DOSAVE_LABEL = "Include DoSave probe (P7)";
 
 let running = false;
 
@@ -24,48 +25,72 @@ function downloadReport(report: SpikeReport): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-function createButton(): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.id = BUTTON_ID;
-  button.type = "button";
-  button.textContent = LABEL;
-  Object.assign(button.style, {
+function createControls(): HTMLDivElement {
+  const container = document.createElement("div");
+  container.id = CONTAINER_ID;
+  Object.assign(container.style, {
     position: "fixed",
     left: "12px",
     bottom: "12px",
     zIndex: "2147483647",
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "6px 10px",
+    background: "rgba(255,255,255,0.95)",
+    borderRadius: "8px",
+    boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+    font: "13px/1.2 sans-serif",
+    color: "#222",
+  });
+
+  const label = document.createElement("label");
+  Object.assign(label.style, { display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" });
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = false;
+  label.append(checkbox, document.createTextNode(DOSAVE_LABEL));
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = LABEL;
+  Object.assign(button.style, {
     padding: "8px 14px",
     font: "13px/1.2 sans-serif",
     color: "#fff",
     background: "#1f6feb",
     border: "none",
     borderRadius: "6px",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
     cursor: "pointer",
   });
-  button.addEventListener("click", () => void onClick(button));
-  return button;
+  button.addEventListener("click", () => void onClick(button, checkbox));
+
+  container.append(button, label);
+  return container;
 }
 
-async function onClick(button: HTMLButtonElement): Promise<void> {
+async function onClick(button: HTMLButtonElement, checkbox: HTMLInputElement): Promise<void> {
   if (running) return;
   const loc = parseAppLocation(location);
   if (!loc) return;
+  const includeDoSave = checkbox.checked;
   running = true;
   button.disabled = true;
+  checkbox.disabled = true;
   button.style.cursor = "wait";
   const setLabel = (text: string) => {
     button.textContent = text;
   };
   let report: SpikeReport;
   try {
-    report = await runProbes(loc, setLabel);
+    report = await runProbes(loc, setLabel, { includeDoSave });
   } catch (e) {
     // runProbes catches per probe; this only guards against a bug in the runner itself.
     report = {
       server: loc.host,
       virtualProxyPrefix: loc.prefix,
       appId: loc.appId,
+      includeDoSave,
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
       probes: [
@@ -89,6 +114,7 @@ async function onClick(button: HTMLButtonElement): Promise<void> {
   }
   running = false;
   button.disabled = false;
+  checkbox.disabled = false;
   button.style.cursor = "pointer";
   setTimeout(() => {
     if (!running) setLabel(LABEL);
@@ -97,10 +123,10 @@ async function onClick(button: HTMLButtonElement): Promise<void> {
 
 /** Shows the button on app pages only. The Qlik client is a single-page app, so this is polled. */
 function sync(): void {
-  const existing = document.getElementById(BUTTON_ID);
+  const existing = document.getElementById(CONTAINER_ID);
   const onAppPage = parseAppLocation(location) !== null;
   if (onAppPage && !existing && document.body) {
-    document.body.appendChild(createButton());
+    document.body.appendChild(createControls());
   } else if (!onAppPage && existing && !running) {
     existing.remove();
   }
