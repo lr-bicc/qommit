@@ -14,7 +14,7 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 |---|---|
 | Qlik-Plattform | Qlik Sense Enterprise on Windows (client-managed). Qlik Cloud ist nicht Teil von v1. |
 | Versionierter Umfang | Komplette App-Struktur: Ladeskript, Variablen, Master-Dimensionen/-Measures/-Visualisierungen, Sheets inkl. Visualisierungen, Bookmarks, Stories, App-Eigenschaften |
-| Restore | In dieselbe App **und** als neue App |
+| Restore | In dieselbe App **und** als neue App (Bookmarks ausgenommen, siehe Abschnitt 4) |
 | Repo-Organisation | Ein Repo pro App in der GitHub-Org `lr-bicc` (wie gitoqlok) |
 | GitHub-Auth | Persönlicher Access Token (classic, Scope `repo`) pro Entwickler, eingetragen in der Optionsseite (wie gitoqlok) |
 | Funktionen v1 | Commit, Historie, Diff, Restore, Tags |
@@ -26,7 +26,7 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 1. Ein Entwickler kann eine App mit einem Klick plus Commit-Nachricht nach GitHub committen; der Commit enthält den vollständigen App-Stand als lesbare Dateien.
 2. Die Historie zeigt alle Commits mit Autor, Datum, Nachricht und Tags.
 3. Diffs zeigen nur echte Änderungen (kein Rauschen durch Reihenfolge oder Formatierung).
-4. **Roundtrip:** App A serialisieren → als neue App B wiederherstellen → B serialisieren ergibt bis auf IDs/Metadaten identische Dateien. Getestet mit mindestens drei echten Apps (klein, mittel, groß).
+4. **Roundtrip:** App A serialisieren → als neue App B wiederherstellen → B serialisieren ergibt identische Dateien (Objekt-IDs bleiben erhalten; ausgenommen sind `.qlik-app.json` und Bookmarks, siehe Abschnitt 4). Getestet mit mindestens drei echten Apps (klein, mittel, groß).
 5. Ein Restore in dieselbe App kann über den automatischen Sicherungs-Commit vollständig rückgängig gemacht werden.
 
 ## 2. Architektur
@@ -38,9 +38,14 @@ Die Qlik Engine API (WebSocket) prüft den `Origin`-Header gegen die Host-Whitel
 |---|---|---|
 | Popup | Extension-Seite | Tabs „Lokale Änderungen“, „Historie“, „Tags“; Commit-Formular; Restore-Dialog; Verknüpfungsdialog (neues Repo / verbinden). Löst nur Befehle aus und zeigt Status – keine Geschäftslogik. |
 | Optionsseite | Extension-Seite | GitHub-Token + „Verbindung prüfen“, Org (Default `lr-bicc`), Repo-Präfix (Default `qlik-`), Liste der Qlik-Server-URLs |
-| Service Worker | Hintergrund | Einziger Halter des Tokens; GitHub-Client; Orchestrierung der Abläufe (Commit, Restore, Tag, Verknüpfung); Nachrichten-Routing |
-| Content Script | Qlik-Seite, isolierte Welt | Brücke Extension ↔ Seitenskript; Diff-Overlay und Restore-Fortschritt in Shadow DOM |
-| Seitenskript | Qlik-Seite, Main World | Engine-Zugriff via enigma.js: App lesen, Objekte anlegen/ändern/löschen, neue App erzeugen, `DoSave` |
+| Service Worker | Hintergrund | Einziger Halter des Tokens; GitHub-Client; Nachrichten-Routing. Hält keinen Zustand im Speicher (siehe „Lebensdauer“). |
+| Content Script | Qlik-Seite, isolierte Welt | Engine-Zugriff via enigma.js (App lesen, Objekte anlegen/ändern/löschen, neue App erzeugen, `DoSave`); führt den Restore-Plan aus; Diff-Overlay und Restore-Fortschritt in Shadow DOM |
+
+**Engine-Zugriff aus dem Content Script:** Netzwerkzugriffe eines Content Scripts laufen unter dem Origin der Seite, also mit deren Cookie und einem Origin, den der Virtual Proxy akzeptiert. Ein zusätzliches Skript in der Main World entfällt damit, und die Qlik-Seite kann den Nachrichtenkanal nicht mitlesen oder fälschen. Der Spike (Abschnitt 7) bestätigt das für WebSockets auf dem Dev-Server; schlägt er fehl, wandert nur der Engine-Zugriff in ein Main-World-Skript, alles andere bleibt gleich.
+
+**WebSocket-URL:** wird aus der Tab-URL abgeleitet, inklusive Virtual-Proxy-Präfix (`https://<host>/<präfix>/sense/app/<id>` → `wss://<host>/<präfix>/app/<id>`).
+
+**Lebensdauer:** Chrome beendet einen untätigen Service Worker nach rund 30 Sekunden. Deshalb führt das Content Script lange Abläufe (Lesen, Restore) selbst aus und ruft den Service Worker nur für einzelne GitHub-Aufrufe. Der Stand eines laufenden Ablaufs liegt in `chrome.storage.session`, damit Popup und Overlay ihn jederzeit anzeigen können.
 
 ### Reine Logikmodule (ohne Browser-Abhängigkeit, einzeln testbar)
 | Modul | Eingabe → Ausgabe |
@@ -49,15 +54,18 @@ Die Qlik Engine API (WebSocket) prüft den `Origin`-Header gegen die Host-Whitel
 | `deserializer` | `FileMap` → typisierte App-Struktur für den Restore |
 | `diff` | zwei `FileMap`s → Liste von Objektänderungen (neu/geändert/gelöscht), für `script.qvs` zusätzlich Zeilen-Diff |
 | `restore-planner` | Zielstand + aktueller App-Stand + gewählte Bereiche → geordnete Aktionsliste (anlegen/ändern/löschen) |
-| `repo-layout` | App-Name/ID → Repo-Name, Dateipfade, Topic, Metadatei |
+| `repo-layout` | App-Name/ID → Repo-Name, Dateipfade, Metadatei |
+| `git-hash` | Dateiinhalt → Git-Blob-SHA (für den Vergleich mit GitHub ohne Download) |
 
 ### Schnittstellen zwischen Kontexten
 Nachrichten sind typisierte Request/Response-Paare (TypeScript-Union), z. B.:
-- Popup → Service Worker: `getStatus`, `commit`, `listHistory`, `createTag`, `restore`, `linkRepo`, `createRepo`
-- Service Worker → Seitenskript (über Content Script): `readApp`, `applyPlan`, `createApp`, `getAppInfo`
-- Service Worker → Content Script: `showDiff`, `showProgress`
+- Popup → Content Script (aktiver Tab): `getStatus`, `commit`, `restore`, `showDiff`, `getAppInfo`
+- Popup → Service Worker: `listHistory`, `createTag`, `linkRepo`, `createRepo`, `listRepos`
+- Content Script → Service Worker: `getHeadTree`, `getFiles`, `pushCommit`
 
-Langlaufende Abläufe laufen im Service Worker bzw. Seitenskript weiter, auch wenn das Popup geschlossen wird; das Popup fragt den Status beim erneuten Öffnen ab.
+Abläufe laufen weiter, auch wenn das Popup geschlossen wird; das Popup liest den Stand beim erneuten Öffnen aus `chrome.storage.session`. Wird der Tab während eines Restores geschlossen oder neu geladen, bricht der Ablauf ab und wird wie ein Fehler mitten im Restore behandelt (Abschnitt 5).
+
+**UI-Sprache:** Deutsch.
 
 ### Tech-Stack
 TypeScript, Manifest V3, Vite, enigma.js, GitHub REST API via `fetch` (Git Data API für atomare Commits), Diff-Bibliothek `diff` (jsdiff) für Zeilen-Diffs, Vitest.
@@ -70,7 +78,7 @@ TypeScript, Manifest V3, Vite, enigma.js, GitHub REST API via `fetch` (Git Data 
 ## 3. Repo-Struktur und Verknüpfung
 
 ### Repo-Benennung
-`<präfix><app-name-slug>`, z. B. `qlik-umsatz-dashboard`. Slug: Kleinbuchstaben, Umlaute transliteriert (ä→ae …), alle anderen Zeichen außer `a-z0-9` → `-`, mehrfache `-` zusammengefasst, max. 80 Zeichen. Bei Kollision werden `-<erste 8 Zeichen der App-ID>` angehängt. Repos werden als **privat** angelegt.
+`<präfix><app-name-slug>`, z. B. `qlik-umsatz-dashboard`. Slug: Kleinbuchstaben, Umlaute transliteriert (ä→ae …), alle anderen Zeichen außer `a-z0-9` → `-`, mehrfache `-` zusammengefasst, max. 80 Zeichen. Bei Kollision werden `-<erste 8 Zeichen der App-ID>` angehängt. Repos werden als **privat** und mit `auto_init: true` angelegt, weil die Git Data API auf einem leeren Repo mit `409` antwortet.
 
 ### Dateistruktur
 ```
@@ -101,25 +109,27 @@ stories/<id>.json
 - JSON mit 2 Leerzeichen Einrückung, Schlüssel rekursiv alphabetisch sortiert, abschließender Zeilenumbruch.
 - Flüchtige Felder werden entfernt (u. a. `qMeta`-Zeitstempel, `qLayout`-Rechenergebnisse, Session-IDs). Die genaue Liste wird im Serializer zentral gepflegt und per Fixture-Tests abgesichert.
 - `script.qvs` wird unverändert (Zeilenenden normalisiert auf `\n`) gespeichert.
-- Variablen-Dateinamen: Variablenname, für das Dateisystem escaped; reservierte/Systemvariablen werden ausgelassen.
+- Variablen-Dateinamen: Variablenname, für das Dateisystem escaped. Reservierte Variablen und im Ladeskript erzeugte Variablen (`qIsScriptCreated`) werden ausgelassen; letztere stehen bereits in `script.qvs` und entstehen beim Reload neu.
+- Objekt-IDs (`qInfo.qId`) bleiben in den Dateien erhalten und werden beim Restore wiederverwendet. Nur so bleiben Verweise gültig, etwa von einer Visualisierung auf ein Master Item.
 
 ### Was nicht versioniert wird
 - Daten bzw. das QVF-Binary
 - Datenverbindungen (Serverebene, enthalten Zugangsdaten)
+- Bilder aus der Medienbibliothek, Themes und Visualisierungs-Extensions. Versioniert wird nur der Verweis darauf; auf dem Zielserver müssen sie vorhanden sein.
 - Private und Community-Objekte. Regel: In **unveröffentlichten** Apps werden alle Objekte versioniert; in **veröffentlichten** Apps nur Objekte mit `qMeta.approved = true` (Basis-Objekte).
 
 ### Verknüpfung App ↔ Repo
-- Jedes verknüpfte Repo trägt das Topic `qlik-<app-id>` pro verknüpfter App.
-- Auflösung beim Öffnen einer App: lokaler Cache (`chrome.storage.local`, App-ID → Repo) → GitHub-Suche `org:<org> topic:qlik-<app-id>`.
+- Die einzige Quelle der Verknüpfung ist `linkedApps` in `.qlik-app.json` auf `main`.
+- Auflösung beim Öffnen einer App: lokaler Cache (`chrome.storage.local`, App-ID → Repo) → sonst eine GraphQL-Abfrage, die alle Repos der Org mit dem Präfix samt Inhalt von `.qlik-app.json` liefert (100 Repos pro Seite), und Suche nach der App-ID darin. Das Ergebnis wird gecacht; ein Cache-Treffer wird beim ersten Zugriff gegen die Datei geprüft.
 - Keine Verknüpfung gefunden → Popup bietet **„Neues Repo anlegen“** oder **„Mit bestehendem Repo verbinden“** (Repo-Auswahl aus der Org, Filter auf Präfix).
-- „Verbinden“ ergänzt Topic und `linkedApps`-Eintrag. So können z. B. Dev- und Prod-App (unterschiedliche IDs) dasselbe Repo nutzen; Umbenennungen der App brechen die Verknüpfung nicht.
-- Da die Verknüpfung auf GitHub liegt, gilt sie für das ganze Team ohne zusätzliche Konfiguration.
-- Hinweis: Die GitHub-Suche kann nach dem Anlegen eines Repos kurz verzögert sein; deshalb wird der Cache beim Anlegen/Verbinden sofort geschrieben.
+- „Verbinden“ ergänzt den `linkedApps`-Eintrag per Commit. So können z. B. Dev- und Prod-App (unterschiedliche IDs) dasselbe Repo nutzen; Umbenennungen der App brechen die Verknüpfung nicht.
+- Da die Verknüpfung im Repo liegt, gilt sie für das ganze Team, und es genügen Schreibrechte auf das Repo.
+- `.qlik-app.json` wird von der Extension verwaltet und erscheint nicht unter „Lokale Änderungen“.
 
 ## 4. Abläufe
 
 ### Lokale Änderungen (Popup-Starttab)
-Seitenskript liest die App → `serializer` → `FileMap`; Service Worker lädt die `FileMap` des HEAD-Commits von `main` → `diff`. Das Popup zeigt geänderte Objekte gruppiert nach Typ mit Status neu/geändert/gelöscht; Klick öffnet den Diff im Overlay.
+Content Script liest die App → `serializer` → `FileMap`. Vom HEAD-Commit auf `main` wird nur der Tree geladen (ein Aufruf, Pfad → Blob-SHA). `git-hash` berechnet die Blob-SHAs der lokalen Dateien; der Vergleich der SHAs ergibt neu/geändert/gelöscht ohne Download. Inhalte werden erst geladen, wenn der Nutzer einen Diff öffnet. Das Popup zeigt geänderte Objekte gruppiert nach Typ, mit Titel statt ID; Klick öffnet den Diff im Overlay.
 
 ### Commit
 1. Nutzer gibt eine Nachricht ein und klickt „Commit“.
@@ -140,12 +150,16 @@ Overlay in der Qlik-Seite: links Liste der geänderten Objekte (gruppiert nach T
 Annotiertes Git-Tag auf einem Commit (Name + optionale Beschreibung). Tag-Namen werden gegen Git-Regeln validiert; bestehender Name → Fehlermeldung, kein Überschreiben. Tab „Tags“ listet alle Tags mit Datum, Commit und Aktionen „Diff zur aktuellen App“ und „Wiederherstellen…“.
 
 ### Restore – gemeinsam
-Dialog mit Auswahl der Bereiche: Skript, Variablen, Master Items, Sheets, Bookmarks, Stories, Eigenschaften (Default: alle). Vor jedem Restore wird `serializerVersion` geprüft; ist sie höher als die der Extension, wird abgebrochen („Extension aktualisieren“).
+Dialog mit Auswahl der Bereiche: Skript, Variablen, Master Items, Sheets, Stories, Eigenschaften (Default: alle). Vor jedem Restore wird `serializerVersion` geprüft; ist sie höher als die der Extension, wird abgebrochen („Extension aktualisieren“).
+
+Objekte werden mit ihrer ursprünglichen ID angelegt. Der `restore-planner` ordnet die Aktionen nach Abhängigkeit: Anlegen und Ändern in der Reihenfolge Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → Skript, Löschen in umgekehrter Reihenfolge.
+
+**Bookmarks werden versioniert und im Diff angezeigt, in v1 aber nicht wiederhergestellt.** Die Engine speichert die Auswahl eines Bookmarks nicht in seinen Eigenschaften; ein Bookmark lässt sich nur anlegen, indem man die Auswahl in einer App mit geladenen Daten nachstellt. In einer neuen App ohne Daten geht das nicht, und in der bestehenden App würde es die laufende Auswahl des Nutzers verändern. Beim Restore in dieselbe App bleiben vorhandene Bookmarks unangetastet.
 
 ### Restore – in dieselbe App
 1. `restore-planner` erzeugt die Aktionsliste; Vorschau „X anlegen, Y ändern, Z löschen“ mit aufklappbarer Objektliste; Nutzer bestätigt.
 2. Weicht die aktuelle App von HEAD ab → automatischer **Sicherungs-Commit** „Sicherung vor Wiederherstellung von `<sha|tag>`“.
-3. Aktionen in fester Reihenfolge ausführen: Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Bookmarks → Stories → Skript; danach `DoSave`. Fortschritt im Overlay.
+3. Aktionen in der Reihenfolge des Plans ausführen; danach `DoSave`. Fortschritt im Overlay.
 4. Automatischer Commit „Wiederhergestellt aus `<sha|tag>`“.
 5. **Veröffentlichte Apps** und Apps ohne Schreibrecht: Restore in dieselbe App ist gesperrt; stattdessen wird „Als neue App“ angeboten.
 
@@ -179,8 +193,8 @@ Im Hub eines beliebigen eingetragenen Servers bietet das Popup „Neue App aus R
 
 ### Sicherheit
 - Token in `chrome.storage.local` (nicht `sync`); nur der Service Worker liest ihn.
-- Token erscheint nie in Logs, Fehlermeldungen oder Nachrichten an Content/Seitenskript.
-- Seitenskript erhält nur die für die jeweilige Aktion nötigen Daten.
+- Token erscheint nie in Logs, Fehlermeldungen oder Nachrichten an das Content Script.
+- Der Service Worker nimmt Nachrichten nur von der eigenen Extension an und führt für das Content Script nur Aufrufe gegen das mit der App verknüpfte Repo aus.
 
 ## 6. Tests
 
@@ -192,6 +206,20 @@ Im Hub eines beliebigen eingetragenen Servers bietet das Popup „Neue App aus R
 - **Manuelle Checkliste** für UI und Sonderfälle: Popup, Overlay, Optionen/Verbindungstest, veröffentlichte App, fehlende Rechte, abgelaufene Sitzung, abgebrochener Restore.
 - Automatisierte E2E-Tests (Playwright) sind für v1 nicht vorgesehen.
 
-## 7. Offene Punkte außerhalb von v1
+## 7. Spike vor der Umsetzung
+
+Mehrere Annahmen über die Engine lassen sich nur am echten Server prüfen. Der erste Schritt des Implementierungsplans ist deshalb ein kurzer Spike gegen den Dev-Server, dessen Code nicht übernommen wird. Er beantwortet:
+
+1. Akzeptiert der Virtual Proxy eine WebSocket-Verbindung aus dem Content Script (isolierte Welt)?
+2. Lassen sich Dimensionen, Measures, Master-Visualisierungen, Sheets und Stories mit vorgegebener `qId` anlegen, in derselben und in einer neuen App?
+3. Übersteht eine Story mit Snapshots den Weg `GetFullPropertyTree` → `SetFullPropertyTree` in eine neue App ohne Daten?
+4. Lässt sich das Ladeskript einer veröffentlichten App mit den Rechten eines Entwicklers lesen?
+5. Bleiben die Daten einer App erhalten, wenn `DoSave` nach Objektänderungen in der Sitzung des Nutzers aufgerufen wird?
+6. Welche Felder ändern sich zwischen zwei Lesevorgängen ohne Änderung an der App (Liste der flüchtigen Felder)?
+
+Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
+
+## 8. Offene Punkte außerhalb von v1
+- Restore von Bookmarks
 - Verteilung (Chrome Web Store „nicht gelistet“ oder Gruppenrichtlinie)
 - Branches, Pull Requests, Apps-Manager, Qlik Cloud
