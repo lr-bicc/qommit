@@ -1,9 +1,9 @@
 # Design: Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
-- **Datum:** 2026-11-11 (Revision 3)
+- **Datum:** 2026-11-11 (Revision 4)
 - **Status:** Entwurf zur Freigabe
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
-- **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und die Bildschirmaufnahme des gitoqlok-Ablaufs vom 2026-11-11
+- **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und drei Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update)
 
 ## 1. Ziel und Rahmen
 
@@ -19,7 +19,8 @@ Entwickler im Qlik-Team versionieren ihre Qlik-Sense-Apps direkt aus dem Browser
 | Repo-Format | gitoqlok-Format (Abschnitt 4); bestehende gitoqlok-Repos bleiben nutzbar |
 | GitHub-Auth | Persönlicher Access Token (classic, Scope `repo`) pro Entwickler, eingetragen in der Optionsseite |
 | Funktionen v1 | Repo anlegen/verbinden, Branch anlegen, Save changes (Commit), Update (Repo-Stand in die App übernehmen, auch ältere Stände), Historie, Diff, Tags, Import (neue App aus Repo) |
-| Nicht in v1 | Pull Requests in der Extension anlegen oder mergen (nur Link nach GitHub), Publish App, Documentation Wizard, Qlik-Helper-Leiste, Apps-Manager, Qlik Cloud, QVF-Builds, Wiederherstellen von Bookmarks |
+| Nicht in v1 | Pull Requests in der Extension anlegen oder mergen (nur Link nach GitHub), Publish App, Documentation Wizard, Qlik-Helper-Leiste, Apps-Manager, Qlik Cloud, QVF-Export, Reload-Tasks und Datenverbindungen, KI-Vorschlag für Commit-Nachrichten, Wiederherstellen von Bookmarks |
+| Umstieg | Das Team steigt vollständig von gitoqlok um; ein Parallelbetrieb auf denselben Repos wird nicht unterstützt. |
 | UI-Ansatz | Chrome Side Panel wie gitoqlok; Diffs als Overlay in der Qlik-Seite |
 | UI-Sprache | Englisch, mit den Bezeichnungen aus gitoqlok („Local Changes“, „Save changes“, „Update“, „Create Branch“ …) |
 | Verteilung | Vorerst als entpackte Extension (Entwicklermodus) |
@@ -124,7 +125,7 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 | `objects/fields.json`, `objects/themes.json`, `objects/glossarylinks.json` werden nicht gepflegt. | Abgeleitete Daten, die sich nicht in eine App zurückschreiben lassen. |
 | Commit-Nachrichten erhalten keinen Zusatz wie `[%_OBJECTS_%%_SCRIPT_%]`. | Der Zusatz ist für die Extension nicht nötig. |
 
-**Bestehende gitoqlok-Repos:** Der erste „Save changes“ mit der Extension entfernt einmalig die Dateien skripterzeugter Variablen und schreibt die normalisierten Datei-URLs. Nicht gepflegte Dateien (`fields.json`, `themes.json`, `glossarylinks.json`, `builds/`) bleiben unverändert liegen.
+**Bestehende gitoqlok-Repos:** Der erste „Save changes“ mit der Extension entfernt einmalig die Dateien skripterzeugter Variablen und schreibt die normalisierten Datei-URLs. Liegen im Repo nicht mehr gepflegte Dateien (`fields.json`, `themes.json`, `glossarylinks.json`, `builds/`), zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt); die Dateien bleiben in der Git-Historie erhalten.
 
 ## 5. Verknüpfung App ↔ Repo ↔ Branch
 
@@ -135,7 +136,7 @@ Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt 
 ```
 - Das Objekt wird nicht versioniert.
 - Wird eine App dupliziert, wandert das Objekt mit. In der Kopie stimmt `appId` nicht mit der eigenen ID überein; daran erkennt die Extension „duplicated from an app tracked in <repo>“.
-- `syncedSha` ist der Commit, mit dem die App zuletzt abgeglichen wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD).
+- `syncedSha` ist der Commit, auf dem die App steht: der letzte eigene Commit oder der Commit, auf den zuletzt aktualisiert wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD). Nach einem Update auf einen älteren Commit meldet das Panel deshalb wie gitoqlok „Repository has N new commits“.
 - Lässt sich das Objekt nicht anlegen (veröffentlichte App, fehlende Rechte), liegen dieselben Angaben in `chrome.storage.local`; die Erkennung von Kopien entfällt dann.
 
 ### Im Repo: Branch-Tabelle in README.md
@@ -153,6 +154,7 @@ Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik applicatio
 - **Kopf:** App-Name; darunter Repo (`lr-bicc/<repo>`, Link nach GitHub), Branch-Badge, Hinweis „Repository has N new commits“, Symbole für „Unlink“ und „Refresh“.
 - **Reiter:** Local Changes · History · Tags · Import
 - **Local Changes:** Commit-Auswahl + **Update** (mit Zähler neuer Commits und Aufklappmenü für die Teile), **Save changes**, darunter die Gruppen *Added objects*, *Deleted objects*, *Changed objects*, jeweils unterteilt nach Sheets, Master Items, Variables, Script, Attached files, mit Objekttitel und Link „details“.
+- **Commit-Auswahl:** aufklappbare, durchsuchbare Liste der Commits des Branches, neuester zuerst, je Eintrag Nachricht, Datum und Uhrzeit sowie Tag-Badges. Vorausgewählt ist der Branch-HEAD.
 - **Fußzeile:** Status („Ready“, „Loading application data…“, Fortschritt).
 - Repo-Daten werden pro Branch zwischengespeichert; „Refresh“ lädt sie neu.
 
@@ -174,11 +176,14 @@ Create Branch:
 Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; liegt er vor `syncedSha`, zeigt der Kopf die Zahl neuer Commits.
 
 ### 6.5 Save changes (Commit)
-1. Dialog mit Commit-Nachricht und Auswahl der Teile: Objects, Bookmarks, Script, Static files (Default: alle).
-2. **Nur möglich, wenn `syncedSha` der Branch-HEAD ist.** Gibt es neue Commits, verlangt die Extension zuerst ein Update. Ein Commit ist ein Schnappschuss der App; auf einen neueren Stand gesetzt, würde er die Änderungen anderer stillschweigend zurückdrehen.
-3. Die App wird frisch gelesen. Der Service Worker lädt geänderte Dateien der gewählten Teile als Blobs hoch (max. 5 parallel, Binärdateien base64), erzeugt den Tree auf Basis des HEAD-Trees (gelöschte Dateien mit `sha: null`), erzeugt den Commit und setzt den Branch per Fast-Forward.
-4. Schlägt das Setzen des Branches fehl, weil inzwischen jemand committet hat → Meldung „Update erforderlich“, nichts geht verloren.
-5. Danach `syncedSha` = neuer Commit. Keine Änderungen → kein leerer Commit.
+1. „Save changes“ schaltet den Reiter in den Commit-Modus, wie bei gitoqlok:
+   - „Choose what to save“ mit den Teilen Load script, App Objects, Bookmarks, Attached files. Vorausgewählt sind alle Teile mit Änderungen.
+   - Jede Gruppe und jedes einzelne Objekt in den Listen erhält ein Häkchen; so lässt sich genau wählen, was in den Commit kommt.
+   - Pflichtfeld für die Commit-Nachricht, Schaltflächen **Save** und **Back**. Nach Erfolg zeigt die Schaltfläche „Success“, und die Liste wird neu geladen.
+2. **Steht die App nicht auf dem Branch-HEAD** (`syncedSha` ≠ HEAD), fragt die Extension vor dem Commit nach: „Update first“ (Standard) oder „Commit anyway“. Ein Commit ist ein Schnappschuss der App; auf einen neueren Stand gesetzt, dreht er dessen Änderungen zurück. „Commit anyway“ listet deshalb die Commits, die überschrieben würden, und ist der Weg, einen älteren Stand bewusst wieder zum aktuellen zu machen.
+3. Die App wird frisch gelesen. Der Service Worker lädt die gewählten geänderten Dateien als Blobs hoch (max. 5 parallel, Binärdateien base64), erzeugt den Tree auf Basis des HEAD-Trees (gelöschte Dateien mit `sha: null`), erzeugt den Commit und setzt den Branch per Fast-Forward.
+4. Schlägt das Setzen des Branches fehl, weil inzwischen jemand committet hat → die Nachfrage aus Schritt 2 erscheint, nichts geht verloren.
+5. Danach `syncedSha` = neuer Commit. Nicht gewählte Änderungen bleiben als lokale Änderungen stehen. Ohne Auswahl gibt es keinen Commit.
 
 Autor ist der GitHub-Account des Token-Inhabers.
 
@@ -186,10 +191,10 @@ Autor ist der GitHub-Account des Token-Inhabers.
 Ziel ist der Branch-HEAD oder ein in der Commit-Auswahl gewählter älterer Commit oder Tag. Über das Aufklappmenü lassen sich die Teile wählen: Objects, Script, Static files (Default: alle).
 
 1. `update-planner` erzeugt die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
-2. Vorschau „X anlegen, Y ändern, Z löschen“ mit aufklappbarer Liste; der Nutzer bestätigt.
+2. Bestätigungsdialog „Update Application from the repository?“ mit dem gewählten Commit (Link nach GitHub), der Vorschau „X anlegen, Y ändern, Z löschen“ mit aufklappbarer Liste und den Schaltflächen **Update** und **Cancel**.
 3. Hat die App lokale Änderungen, werden sie zuerst gesichert: Commit des aktuellen App-Stands mit Parent `syncedSha` auf einen neuen Branch `backup/<branch>-<JJJJMMTT-hhmm>`. Der Sicherungs-Branch lässt sich auf GitHub per Pull Request wieder einbringen oder per Update zurückholen.
-4. Aktionen ausführen, danach `DoSave`. Fortschritt in der Fußzeile.
-5. `syncedSha` = Branch-HEAD. Wurde ein älterer Commit oder nur ein Teil übernommen, erscheinen die Unterschiede zum HEAD anschließend als lokale Änderungen; „Save changes“ macht daraus einen normalen Commit. Es gibt keinen automatischen Commit.
+4. Aktionen ausführen, danach `DoSave`. Fortschritt in der Fußzeile; die Update-Schaltfläche zeigt am Ende „Success“. Geschrieben werden nur Objekte, die sich vom Zielstand unterscheiden.
+5. `syncedSha` = übernommener Commit, sofern er auf dem Branch liegt. Wurde nur ein Teil übernommen, erscheinen die übrigen Unterschiede als lokale Änderungen. Liegt das Ziel nicht auf dem Branch (Tag oder Sicherungs-Branch außerhalb), bleibt `syncedSha` unverändert, und der übernommene Stand erscheint insgesamt als lokale Änderung. Es gibt keinen automatischen Commit.
 6. Veröffentlichte Apps und Apps ohne Schreibrecht: Update ist gesperrt; stattdessen wird Import angeboten.
 
 ### 6.7 History und Diff
@@ -214,7 +219,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 | `403` sonstige | „No permission“ (z. B. Repo-Anlage in der Org nicht erlaubt → Admin legt Repo an, danach „Connect“) |
 | `404` | „Repository not found or no access“ |
 | `422` bei Repo-Anlage | Name existiert → „Connect to existing repository“ anbieten |
-| Branch lässt sich nicht per Fast-Forward setzen | „Update required“ (6.5) |
+| Branch lässt sich nicht per Fast-Forward setzen | Nachfrage „Update first“ / „Commit anyway“ (6.5) |
 | Geschützter Branch lehnt Commit ab | Meldung mit Hinweis, auf einem eigenen Branch zu arbeiten |
 | Netzwerkfehler | Meldung mit „Retry“ |
 
