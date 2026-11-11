@@ -173,7 +173,7 @@ Create Branch:
 - Existiert der Branch-Name bereits → Fehlermeldung, nichts wird geändert.
 
 ### 6.4 Local Changes
-Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; liegt er vor `syncedSha`, zeigt der Kopf die Zahl neuer Commits.
+Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; ist er neuer als `syncedSha`, zeigt der Kopf die Zahl der Commits dazwischen.
 
 ### 6.5 Save changes (Commit)
 1. „Save changes“ schaltet den Reiter in den Commit-Modus, wie bei gitoqlok:
