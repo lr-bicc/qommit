@@ -5,6 +5,7 @@ import { parseAppLocation, runProbes, type SpikeReport } from "./probes";
 const CONTAINER_ID = "qlik-git-spike";
 const LABEL = "Run spike probes";
 const DOSAVE_LABEL = "Include DoSave probe (P7)";
+const NEWAPP_LABEL = "Include new-app probe (P9)";
 
 let running = false;
 
@@ -44,12 +45,17 @@ function createControls(): HTMLDivElement {
     color: "#222",
   });
 
-  const label = document.createElement("label");
-  Object.assign(label.style, { display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" });
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = false;
-  label.append(checkbox, document.createTextNode(DOSAVE_LABEL));
+  const option = (text: string, checked: boolean) => {
+    const label = document.createElement("label");
+    Object.assign(label.style, { display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" });
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = checked;
+    label.append(checkbox, document.createTextNode(text));
+    return { label, checkbox };
+  };
+  const doSave = option(DOSAVE_LABEL, false);
+  const newApp = option(NEWAPP_LABEL, true);
 
   const button = document.createElement("button");
   button.type = "button";
@@ -63,27 +69,29 @@ function createControls(): HTMLDivElement {
     borderRadius: "6px",
     cursor: "pointer",
   });
-  button.addEventListener("click", () => void onClick(button, checkbox));
+  button.addEventListener("click", () => void onClick(button, doSave.checkbox, newApp.checkbox));
 
-  container.append(button, label);
+  container.append(button, doSave.label, newApp.label);
   return container;
 }
 
-async function onClick(button: HTMLButtonElement, checkbox: HTMLInputElement): Promise<void> {
+async function onClick(button: HTMLButtonElement, doSaveBox: HTMLInputElement, newAppBox: HTMLInputElement): Promise<void> {
   if (running) return;
   const loc = parseAppLocation(location);
   if (!loc) return;
-  const includeDoSave = checkbox.checked;
+  const includeDoSave = doSaveBox.checked;
+  const includeNewApp = newAppBox.checked;
   running = true;
   button.disabled = true;
-  checkbox.disabled = true;
+  doSaveBox.disabled = true;
+  newAppBox.disabled = true;
   button.style.cursor = "wait";
   const setLabel = (text: string) => {
     button.textContent = text;
   };
   let report: SpikeReport;
   try {
-    report = await runProbes(loc, setLabel, { includeDoSave });
+    report = await runProbes(loc, setLabel, { includeDoSave, includeNewApp });
   } catch (e) {
     // runProbes catches per probe; this only guards against a bug in the runner itself.
     report = {
@@ -91,6 +99,7 @@ async function onClick(button: HTMLButtonElement, checkbox: HTMLInputElement): P
       virtualProxyPrefix: loc.prefix,
       appId: loc.appId,
       includeDoSave,
+      includeNewApp,
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
       probes: [
@@ -114,7 +123,8 @@ async function onClick(button: HTMLButtonElement, checkbox: HTMLInputElement): P
   }
   running = false;
   button.disabled = false;
-  checkbox.disabled = false;
+  doSaveBox.disabled = false;
+  newAppBox.disabled = false;
   button.style.cursor = "pointer";
   setTimeout(() => {
     if (!running) setLabel(LABEL);

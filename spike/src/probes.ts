@@ -3,6 +3,10 @@
 // has its own timeout, so the report is always produced.
 import enigma from "enigma.js";
 import schema from "enigma.js/schemas/12.2027.0.json";
+// The project's own code, bundled by esbuild, so P4 reports exactly what the tool would write.
+import { serializeApp } from "../../src/core/serializer";
+import { gitBlobSha } from "../../src/core/git-hash";
+import type { AppSnapshot, GenericProps, PropertyTree } from "../../src/core/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +49,7 @@ export interface SpikeReport {
   virtualProxyPrefix: string;
   appId: string;
   includeDoSave: boolean;
+  includeNewApp: boolean;
   startedAt: string;
   finishedAt: string;
   probes: ProbeResult[];
@@ -61,9 +66,23 @@ export interface AppLocation {
   wsScheme: "wss" | "ws";
 }
 
+/** The app P9 creates; only this app is ever deleted. */
+interface NewAppState {
+  name: string;
+  id: string | null;
+  session: EnigmaSession | null;
+  deleted: boolean;
+  deleteVia: string | null;
+  deleteErrors: string[];
+  /** Serialises cleanup calls from the probe and from the runner. */
+  chain: Promise<void>;
+}
+
 interface Context {
   loc: AppLocation;
   csrfToken: string | null;
+  /** Whether the session P1 kept was opened with the CSRF token (P9 opens its session the same way). */
+  sessionUsesToken: boolean;
   session: EnigmaSession | null;
   global: EngineApi | null;
   doc: EngineApi | null;
@@ -71,6 +90,10 @@ interface Context {
   engineUnavailable: string | null;
   notifications: { method: string; params: unknown }[];
   sessionEvents: string[];
+  /** Set by P6: number of stories (null = P6 did not finish) and the id of the first one. */
+  storyCount: number | null;
+  storyId: string | null;
+  newApp: NewAppState | null;
 }
 
 type Evidence = Record<string, unknown>;
@@ -81,6 +104,8 @@ interface ProbeDef {
   timeoutMs: number;
   needsEngine: boolean;
   run(ctx: Context, ev: Evidence, cancel: CancelToken): Promise<{ ok: boolean; detail: string }>;
+  /** Runs after `run` settled or timed out, with its own timeout; for clean-up that must not be skipped. */
+  cleanup?(ctx: Context, ev: Evidence): Promise<void>;
 }
 
 /** Set by the runner when a probe times out, so the probe stops starting new work. */
@@ -91,6 +116,8 @@ interface CancelToken {
 export interface RunOptions {
   /** Run P7 (DoSave). Off by default so a run can check persistence without saving. */
   includeDoSave: boolean;
+  /** Run P9 (creates and deletes one app "spike-probe-<timestamp>"). On by default. */
+  includeNewApp: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +245,29 @@ function findStrings(value: unknown, needles: string[], path = "$", hits: { need
   return hits;
 }
 
+/** Number of keys with the given name anywhere in the value (no limit). */
+function countKey(value: unknown, key: string): number {
+  if (Array.isArray(value)) return value.reduce((n: number, v) => n + countKey(v, key), 0);
+  if (value && typeof value === "object") {
+    let n = 0;
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) n += (k === key ? 1 : 0) + countKey(v, key);
+    return n;
+  }
+  return 0;
+}
+
+/** Replaces every occurrence of the token in every string of the value (last line of defence for the report). */
+function scrubToken<T>(value: T, token: string): T {
+  if (typeof value === "string") return value.split(token).join("<redacted>") as T;
+  if (Array.isArray(value)) return value.map((v) => scrubToken(v, token)) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[scrubToken(k, token)] = scrubToken(v, token);
+    return out as T;
+  }
+  return value;
+}
+
 /** Paths of every key with the given name. */
 function findKeyPaths(value: unknown, key: string, path = "$", hits: string[] = [], limit = 20): string[] {
   if (hits.length >= limit) return hits;
@@ -279,6 +329,53 @@ function requireDoc(ctx: Context): EngineApi {
   return ctx.doc;
 }
 
+type Notification = { method: string; params: unknown };
+
+function engineUrl(ctx: Context, appId: string, withToken: boolean): { url: string; shown: string } {
+  const base = `${ctx.loc.wsScheme}://${ctx.loc.host}${ctx.loc.prefix}/app/${appId}`;
+  if (!withToken || !ctx.csrfToken) return { url: base, shown: base };
+  return { url: `${base}?qlik-csrf-token=${encodeURIComponent(ctx.csrfToken)}`, shown: `${base}?qlik-csrf-token=<redacted>` };
+}
+
+/** Opens an enigma.js session; on failure the half-open session is closed before the error is rethrown. */
+async function openEngineSession(url: string, label: string, notifications: Notification[], events: string[]): Promise<{ session: EnigmaSession; global: EngineApi }> {
+  const session = (enigma as unknown as EnigmaModule).create({
+    schema,
+    url,
+    createSocket: (u) => new WebSocket(u),
+    suspendOnClose: false,
+  });
+  session.on("notification:*", (method, params) => {
+    notifications.push({ method: String(method), params });
+  });
+  session.on("closed", (evt) => {
+    const e = evt as { code?: number; reason?: string } | undefined;
+    events.push(`closed code=${e?.code ?? "?"} reason=${e?.reason ?? ""}`);
+  });
+  try {
+    const global = await step(session.open(), label, 20_000);
+    return { session, global };
+  } catch (e) {
+    await closeQuietly(session);
+    throw e;
+  }
+}
+
+async function closeQuietly(session: EnigmaSession | null): Promise<void> {
+  if (!session) return;
+  try {
+    await withTimeout(session.close(), 5_000, "session.close");
+  } catch {
+    /* best effort */
+  }
+}
+
+async function sessionStateOf(notifications: Notification[]): Promise<string | null> {
+  await waitFor(() => notifications.some((n) => n.method === "OnConnected"), 3_000);
+  const connected = notifications.find((n) => n.method === "OnConnected");
+  return (connected?.params as { qSessionState?: string } | undefined)?.qSessionState ?? null;
+}
+
 async function getAllInfos(doc: EngineApi): Promise<NxInfo[]> {
   const infos = (await step(doc.getAllInfos(), "GetAllInfos")) as NxInfo[] | undefined;
   return Array.isArray(infos) ? infos : [];
@@ -302,9 +399,14 @@ const SPIKE_IDS = {
   measure: "spike-measure",
   masterobject: "spike-masterobject",
   sheet: "spike-sheet",
+  story: "spike-story",
+  variable: "spike-variable",
   link: "spike-git-link",
   variableList: "spike-variable-list",
+  p4VariableList: "spike-p4-variable-list",
 };
+/** Variable names cannot reasonably contain "-"; this one is only ever created, never cleaned up by name. */
+const SPIKE_VARIABLE_NAME = "spike_variable";
 
 /** Visualization and standard Sense types; everything else counts as "unknown" for P10. */
 const KNOWN_TYPES = new Set([
@@ -315,62 +417,115 @@ const KNOWN_TYPES = new Set([
   "waterfallchart", "mekkochart", "container", "action-button",
 ]);
 
+/** Looks for a token in a response body; returns presence and length only, never the value. */
+function tokenInBody(text: string): { value: string | null; key: string | null } {
+  const trimmed = text.trim();
+  if (trimmed === "") return { value: null, key: null };
+  try {
+    const json = JSON.parse(trimmed) as unknown;
+    if (typeof json === "string" && json !== "") return { value: json, key: "(JSON string)" };
+    if (json && typeof json === "object" && !Array.isArray(json)) {
+      for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
+        if (/csrf|token/i.test(k) && typeof v === "string" && v !== "") return { value: v, key: k };
+      }
+    }
+    return { value: null, key: null };
+  } catch {
+    // A bare token as plain text: one word without spaces or markup.
+    return /^[A-Za-z0-9._~+/=-]{8,}$/.test(trimmed) ? { value: trimmed, key: "(plain text)" } : { value: null, key: null };
+  }
+}
+
 const P11: ProbeDef = {
   id: "P11",
-  question: "Does GET /<prefix>/qps/csrftoken return a qlik-csrf-token response header?",
+  question: "Does GET /<prefix>/qps/csrftoken return a CSRF token, and where (response header or body)?",
   timeoutMs: 30_000,
   needsEngine: false,
   async run(ctx, ev) {
     const url = `${ctx.loc.origin}${ctx.loc.prefix}/qps/csrftoken`;
     ev.url = url;
-    const { result, response } = await http(url, { method: "GET" }, "GET csrftoken");
+    // The body is never copied into the report: it may be the token itself.
+    const { result, response, text } = await http(url, { method: "GET" }, "GET csrftoken");
     ev.status = result.status;
     if (result.error) ev.error = result.error;
-    const token = response?.headers.get("qlik-csrf-token") ?? null;
-    ev.headerPresent = token !== null && token !== "";
-    ev.tokenLength = token ? token.length : 0;
-    ev.responseHeaderNames = response ? Array.from(response.headers.keys()) : [];
-    ctx.csrfToken = token || null;
-    return ev.headerPresent
-      ? { ok: true, detail: `status ${result.status}, header qlik-csrf-token present` }
-      : { ok: false, detail: `status ${result.status ?? "none"}, header qlik-csrf-token absent; P1 connects without token` };
+    const headerNames = response ? Array.from(response.headers.keys()) : [];
+    ev.responseHeaderNames = headerNames;
+    const tokenHeader = headerNames.find((h) => /csrf/i.test(h) && (response?.headers.get(h) ?? "") !== "") ?? null;
+    const headerToken = tokenHeader ? response!.headers.get(tokenHeader) : null;
+    ev.tokenHeaderName = tokenHeader;
+    ev.headerPresent = headerToken !== null;
+    ev.headerTokenLength = headerToken ? headerToken.length : 0;
+    ev.contentType = response?.headers.get("content-type") ?? null;
+    ev.bodyLength = text.length;
+    const body = response ? tokenInBody(text) : { value: null, key: null };
+    ev.bodyHasToken = body.value !== null;
+    ev.bodyTokenLength = body.value ? body.value.length : 0;
+    ev.bodyTokenKey = body.key;
+    ev.bodyTokenEqualsHeaderToken = headerToken !== null && body.value !== null ? headerToken === body.value : null;
+    ctx.csrfToken = headerToken ?? body.value ?? null;
+    ev.tokenSource = headerToken ? `header ${tokenHeader}` : body.value ? "body" : null;
+    return ctx.csrfToken
+      ? { ok: true, detail: `status ${result.status}, token found in ${String(ev.tokenSource)} (length ${ctx.csrfToken.length})` }
+      : { ok: false, detail: `status ${result.status ?? "none"}, no token in headers or body; P1 connects without token` };
   },
 };
 
+type SessionAttempt = { ok: boolean; sessionState?: string | null; error?: string; notifications?: string[] };
+
 const P1: ProbeDef = {
   id: "P1",
-  question: "Can the content script open an enigma.js WebSocket session, open the app and read its properties?",
-  timeoutMs: 45_000,
+  question: "Can the content script open an enigma.js WebSocket session (without and with the CSRF token), open the app and read its properties?",
+  timeoutMs: 120_000,
   needsEngine: false,
   async run(ctx, ev) {
-    const base = `${ctx.loc.wsScheme}://${ctx.loc.host}${ctx.loc.prefix}/app/${ctx.loc.appId}`;
-    const url = ctx.csrfToken ? `${base}?qlik-csrf-token=${encodeURIComponent(ctx.csrfToken)}` : base;
-    ev.url = ctx.csrfToken ? `${base}?qlik-csrf-token=<redacted>` : base;
-    ev.withCsrfToken = Boolean(ctx.csrfToken);
+    // 1. Without the token: does the virtual proxy require it at all? This session is closed again.
+    const plain = engineUrl(ctx, ctx.loc.appId, false);
+    const trialNotes: Notification[] = [];
+    const trialEvents: string[] = [];
+    let withoutToken: SessionAttempt;
+    try {
+      const { session } = await openEngineSession(plain.url, "session.open without token", trialNotes, trialEvents);
+      withoutToken = { ok: true, sessionState: await sessionStateOf(trialNotes) };
+      await closeQuietly(session);
+    } catch (e) {
+      withoutToken = { ok: false, error: describeError(e) };
+    }
+    withoutToken.notifications = trialNotes.map((n) => n.method);
+    ev.withoutToken = { ...withoutToken, sessionEvents: trialEvents };
 
-    const session = (enigma as unknown as EnigmaModule).create({
-      schema,
-      url,
-      createSocket: (u) => new WebSocket(u),
-      suspendOnClose: false,
-    });
-    ctx.session = session;
-    session.on("notification:*", (method, params) => {
-      ctx.notifications.push({ method: String(method), params });
-    });
-    session.on("closed", (evt) => {
-      const e = evt as { code?: number; reason?: string } | undefined;
-      ctx.sessionEvents.push(`closed code=${e?.code ?? "?"} reason=${e?.reason ?? ""}`);
-    });
+    // 2. With the token, as the real tool would do it. This session is kept when it works.
+    let kept: { session: EnigmaSession; global: EngineApi; viaToken: boolean } | null = null;
+    if (ctx.csrfToken) {
+      const tokenUrl = engineUrl(ctx, ctx.loc.appId, true);
+      ev.url = tokenUrl.shown;
+      try {
+        const opened = await openEngineSession(tokenUrl.url, "session.open with token", ctx.notifications, ctx.sessionEvents);
+        kept = { ...opened, viaToken: true };
+        ev.withToken = { ok: true, sessionState: await sessionStateOf(ctx.notifications) } satisfies SessionAttempt;
+      } catch (e) {
+        ev.withToken = { ok: false, error: describeError(e) } satisfies SessionAttempt;
+        ctx.notifications.length = 0;
+      }
+    } else {
+      ev.withToken = { ok: false, error: "not attempted: P11 found no token" } satisfies SessionAttempt;
+    }
 
-    const global = await step(session.open(), "session.open", 20_000);
-    ctx.global = global;
-    await waitFor(() => ctx.notifications.some((n) => n.method === "OnConnected"), 3_000);
-    const connected = ctx.notifications.find((n) => n.method === "OnConnected");
-    ev.qSessionState = (connected?.params as { qSessionState?: string } | undefined)?.qSessionState ?? null;
+    // 3. Fall back to a fresh session without the token if only that variant worked.
+    if (!kept && withoutToken.ok) {
+      ev.url = plain.shown;
+      const opened = await openEngineSession(plain.url, "session.open without token (kept)", ctx.notifications, ctx.sessionEvents);
+      kept = { ...opened, viaToken: false };
+    }
+    if (!kept) throw new Error("no session could be opened, neither without nor with the CSRF token (see withoutToken / withToken)");
+    ctx.session = kept.session;
+    ctx.global = kept.global;
+    ctx.sessionUsesToken = kept.viaToken;
+    ev.sessionUsed = kept.viaToken ? "withToken" : "withoutToken";
+    ev.qSessionState = await sessionStateOf(ctx.notifications);
     ev.notifications = ctx.notifications.map((n) => n.method);
     const auth = ctx.notifications.find((n) => n.method === "OnAuthenticationInformation");
     if (auth) ev.authenticationInformation = auth.params;
+    const global = kept.global;
 
     // In an attached session the client already has the app open; OpenDoc then fails
     // (typically LOCERR_APP_ALREADY_OPEN, 1002) and GetActiveDoc returns the open app.
@@ -395,14 +550,169 @@ const P1: ProbeDef = {
     } catch (e) {
       ev.appLayoutError = describeError(e);
     }
-    return { ok: true, detail: `session ${String(ev.qSessionState)}, doc via ${String(ev.docVia)}, title "${String(ev.appTitle)}"` };
+    return {
+      ok: true,
+      detail: `without token ${withoutToken.ok ? "ok" : "failed"}, with token ${(ev.withToken as SessionAttempt).ok ? "ok" : "failed/not attempted"}; ` +
+        `using ${String(ev.sessionUsed)}, session ${String(ev.qSessionState)}, doc via ${String(ev.docVia)}, title "${String(ev.appTitle)}"`,
+    };
   },
 };
 
+const SAMPLE_GROUPS = ["variables", "dimensions", "measures", "masterobjects", "sheets", "stories", "bookmarks"];
+
+interface VariableListItem { qName: string; qInfo: NxInfo; qIsScriptCreated?: boolean; qIsReserved?: boolean; qIsConfig?: boolean }
+
+/** Reads every variable with a list (qShowReserved/qShowConfig) so the flags can be compared with GetProperties. */
+async function readVariableList(doc: EngineApi): Promise<VariableListItem[]> {
+  const id = SPIKE_IDS.p4VariableList;
+  try {
+    await step(doc.destroySessionObject(id), "DestroySessionObject (stale)");
+  } catch {
+    /* not present */
+  }
+  try {
+    const list: EngineApi = await step(
+      doc.createSessionObject({
+        qInfo: { qId: id, qType: "VariableList" },
+        qVariableListDef: { qType: "variable", qShowReserved: true, qShowConfig: true, qData: {} },
+      }),
+      "CreateSessionObject VariableList",
+    );
+    const layout = (await step(list.getLayout(), "VariableList GetLayout")) as { qVariableList?: { qItems?: VariableListItem[] } };
+    return layout.qVariableList?.qItems ?? [];
+  } finally {
+    try {
+      await step(doc.destroySessionObject(id), "DestroySessionObject VariableList");
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+const hasFlags = (v: object | undefined): boolean => !!v && ("qIsScriptCreated" in v || "qIsReserved" in v);
+
+/**
+ * Builds the repository file map of the open app with the project's serializer and reports
+ * per path the git blob SHA and byte length (no appcontent), plus one sample per group.
+ */
+async function comparableOutput(ctx: Context, doc: EngineApi, infos: NxInfo[], ev: Evidence): Promise<string> {
+  const errors: string[] = [];
+  const note = (what: string, e: unknown) => {
+    if (errors.length < 30) errors.push(`${what}: ${describeError(e)}`);
+  };
+  const ofType = (t: string) => infos.filter((i) => i.qType === t);
+  const trees = async (type: string): Promise<PropertyTree[]> => {
+    const out: PropertyTree[] = [];
+    for (const info of ofType(type)) {
+      try {
+        const obj: EngineApi = await step(doc.getObject(info.qId), `GetObject ${info.qId}`);
+        out.push((await step(obj.getFullPropertyTree(), `GetFullPropertyTree ${info.qId}`, 60_000)) as PropertyTree);
+      } catch (e) {
+        note(`${type} ${info.qId}`, e);
+      }
+    }
+    return out;
+  };
+  const generics = async (type: string, open: (id: string) => Promise<EngineApi>, ids = ofType(type).map((i) => i.qId)): Promise<GenericProps[]> => {
+    const out: GenericProps[] = [];
+    for (const id of ids) {
+      try {
+        const handle = await step(open(id), `open ${type} ${id}`);
+        out.push((await step(handle.getProperties(), `GetProperties ${id}`)) as GenericProps);
+      } catch (e) {
+        note(`${type} ${id}`, e);
+      }
+    }
+    return out;
+  };
+
+  // Variables: GetAllInfos and the variable list together; flags from whichever source carries them.
+  let listItems: VariableListItem[] = [];
+  try {
+    listItems = await readVariableList(doc);
+  } catch (e) {
+    note("variable list", e);
+  }
+  const listById = new Map(listItems.map((i) => [i.qInfo.qId, i]));
+  const variableIds = Array.from(new Set([...ofType("variable").map((i) => i.qId), ...listById.keys()]));
+  const variableProps = await generics("variable", (id) => doc.getVariableById(id), variableIds);
+  const withPropFlags = variableProps.filter((v) => hasFlags(v)).length;
+  const withListFlags = listItems.filter((i) => hasFlags(i)).length;
+  const sourcesUsed = new Set<string>();
+  const variables = variableProps.filter((v) => {
+    const listItem = listById.get(v.qInfo?.qId);
+    const source = hasFlags(v) ? "GetProperties" : hasFlags(listItem) ? "VariableList" : null;
+    const flags = (source === "GetProperties" ? v : source === "VariableList" ? listItem : undefined) as
+      { qIsScriptCreated?: unknown; qIsReserved?: unknown } | undefined;
+    if (source) sourcesUsed.add(source);
+    return !(flags?.qIsScriptCreated === true || flags?.qIsReserved === true);
+  });
+  ev.variableFlags = {
+    variablesRead: variableProps.length,
+    variablesInList: listItems.length,
+    getPropertiesCarriesFlags: withPropFlags,
+    variableListCarriesFlags: withListFlags,
+    sourceUsed: sourcesUsed.size === 0 ? "none" : Array.from(sourcesUsed).sort().join("+"),
+    leftOutAsScriptCreatedOrReserved: variableProps.length - variables.length,
+  };
+
+  let appPropertiesText: string | null = null;
+  try {
+    appPropertiesText = JSON.stringify(await step(doc.getAppProperties(), "GetAppProperties"), null, 2);
+  } catch (e) {
+    note("GetAppProperties", e);
+  }
+  let script = "";
+  try {
+    script = (await step(doc.getScript(), "GetScript", 45_000)) as string;
+  } catch (e) {
+    note("GetScript", e);
+  }
+
+  const snapshot: AppSnapshot = {
+    appId: ctx.loc.appId,
+    script: typeof script === "string" ? script : "",
+    appProps: await trees("appprops"),
+    variables,
+    dimensions: await generics("dimension", (id) => doc.getDimension(id)),
+    measures: await generics("measure", (id) => doc.getMeasure(id)),
+    masterObjects: await trees("masterobject"),
+    sheets: await trees("sheet"),
+    stories: await trees("story"),
+    bookmarks: await generics("bookmark", (id) => doc.getBookmark(id)),
+    staticFiles: new Map(), // appcontent is not part of the comparison
+  };
+  ev.snapshotReadErrors = errors;
+  ev.getAppPropertiesSample = appPropertiesText;
+
+  let files: Map<string, string | Uint8Array>;
+  try {
+    files = serializeApp(snapshot, { canonicalAppId: ctx.loc.appId });
+  } catch (e) {
+    throw new Error(`serializeApp failed: ${describeError(e)}`); // e.g. an id the repository cannot store
+  }
+  const paths = [...files.keys()].sort();
+  const entries: { path: string; sha: string; bytes: number }[] = [];
+  for (const path of paths) {
+    const content = files.get(path)!;
+    const bytes = typeof content === "string" ? new TextEncoder().encode(content).length : content.length;
+    entries.push({ path, sha: await gitBlobSha(content), bytes });
+  }
+  ev.fileHashes = entries;
+  const samples: Record<string, string> = {};
+  for (const group of SAMPLE_GROUPS) {
+    const first = paths.find((p) => p.startsWith(`objects/${group}/`));
+    if (first) samples[first] = files.get(first) as string;
+  }
+  if (files.has("objects/appprops.json")) samples["objects/appprops.json"] = files.get("objects/appprops.json") as string;
+  ev.samples = samples;
+  return `${entries.length} files hashed, ${errors.length} read errors`;
+}
+
 const P4: ProbeDef = {
   id: "P4",
-  question: "Is reading stable: do two consecutive reads of sheets (GetFullPropertyTree) and measures (GetProperties) produce identical JSON?",
-  timeoutMs: 240_000,
+  question: "Is reading stable (two reads of sheets and measures identical), and which files with which blob SHAs would the tool write for this app?",
+  timeoutMs: 480_000,
   needsEngine: true,
   async run(ctx, ev) {
     const doc = requireDoc(ctx);
@@ -446,9 +756,20 @@ const P4: ProbeDef = {
     ev.deviations = deviations;
     ev.firstDifferingPath = firstDiff;
     ev.errors = errors;
+    const stable = `${compared} objects compared, ${deviations} deviations, ${errors.length} read errors`;
+
+    let comparable: string;
+    let comparableOk = false;
+    try {
+      comparable = await comparableOutput(ctx, doc, infos, ev);
+      comparableOk = (ev.snapshotReadErrors as string[]).length === 0;
+    } catch (e) {
+      comparable = describeError(e);
+      ev.comparableOutputError = comparable;
+    }
     return {
-      ok: deviations === 0 && errors.length === 0,
-      detail: `${compared} objects compared, ${deviations} deviations, ${errors.length} read errors`,
+      ok: deviations === 0 && errors.length === 0 && comparableOk,
+      detail: `${stable}; ${comparable}`,
     };
   },
 };
@@ -462,9 +783,11 @@ const P6: ProbeDef = {
     const doc = requireDoc(ctx);
     const stories = (await getAllInfos(doc)).filter((i) => i.qType === "story");
     ev.storyCount = stories.length;
+    ctx.storyCount = stories.length;
     if (stories.length === 0) return { ok: true, detail: "no stories in this app" };
     const first = stories[0];
     ev.firstStoryId = first.qId;
+    ctx.storyId = first.qId;
     const obj: EngineApi = await step(doc.getObject(first.qId), `GetObject ${first.qId}`);
     const tree = await step(obj.getFullPropertyTree(), `GetFullPropertyTree ${first.qId}`, 60_000);
     ev.sizeBytes = byteSize(tree);
@@ -612,70 +935,269 @@ const P8: ProbeDef = {
   },
 };
 
+type SpikeKind = "dimension" | "measure" | "masterobject" | "sheet" | "story" | "variable";
+interface SpikeObjectSpec {
+  kind: SpikeKind;
+  id: string;
+  create: () => Promise<EngineApi>;
+  get: () => Promise<EngineApi>;
+  destroy: () => Promise<unknown>;
+}
+
+/** The objects P2 creates in the open app and P9 creates in the new app, all with fixed "spike-" ids. */
+function spikeObjectSpecs(doc: EngineApi): SpikeObjectSpec[] {
+  return [
+    {
+      kind: "dimension",
+      id: SPIKE_IDS.dimension,
+      create: () =>
+        doc.createDimension({
+          qInfo: { qId: SPIKE_IDS.dimension, qType: "dimension" },
+          qDim: { qGrouping: "N", qFieldDefs: ["=1"], qFieldLabels: ["spike"], qLabelExpression: "" },
+          qMetaDef: { title: "spike-dimension" },
+        }),
+      get: () => doc.getDimension(SPIKE_IDS.dimension),
+      destroy: () => doc.destroyDimension(SPIKE_IDS.dimension),
+    },
+    {
+      kind: "measure",
+      id: SPIKE_IDS.measure,
+      create: () =>
+        doc.createMeasure({
+          qInfo: { qId: SPIKE_IDS.measure, qType: "measure" },
+          qMeasure: { qLabel: "spike", qDef: "=1", qGrouping: "N", qExpressions: [], qActiveExpression: 0, qLabelExpression: "" },
+          qMetaDef: { title: "spike-measure" },
+        }),
+      get: () => doc.getMeasure(SPIKE_IDS.measure),
+      destroy: () => doc.destroyMeasure(SPIKE_IDS.measure),
+    },
+    {
+      kind: "masterobject",
+      id: SPIKE_IDS.masterobject,
+      create: () =>
+        doc.createObject({
+          qInfo: { qId: SPIKE_IDS.masterobject, qType: "masterobject" },
+          qMetaDef: { title: "spike-masterobject" },
+          visualization: "text-image",
+          markdown: "spike",
+        }),
+      get: () => doc.getObject(SPIKE_IDS.masterobject),
+      destroy: () => doc.destroyObject(SPIKE_IDS.masterobject),
+    },
+    {
+      kind: "sheet",
+      id: SPIKE_IDS.sheet,
+      create: () =>
+        doc.createObject({
+          qInfo: { qId: SPIKE_IDS.sheet, qType: "sheet" },
+          qMetaDef: { title: "spike-sheet", description: "" },
+          rank: 9999,
+          columns: 24,
+          rows: 12,
+          cells: [],
+          qChildListDef: { qData: { title: "/title" } },
+        }),
+      get: () => doc.getObject(SPIKE_IDS.sheet),
+      destroy: () => doc.destroyObject(SPIKE_IDS.sheet),
+    },
+    {
+      kind: "story",
+      id: SPIKE_IDS.story,
+      create: () =>
+        doc.createObject({
+          qInfo: { qId: SPIKE_IDS.story, qType: "story" },
+          qMetaDef: { title: "spike-story", description: "" },
+          rank: 9999,
+          qChildListDef: { qData: { title: "/title", rank: "/rank" } },
+        }),
+      get: () => doc.getObject(SPIKE_IDS.story),
+      destroy: () => doc.destroyObject(SPIKE_IDS.story),
+    },
+    {
+      kind: "variable",
+      id: SPIKE_IDS.variable,
+      create: () =>
+        doc.createVariableEx({
+          qInfo: { qId: SPIKE_IDS.variable, qType: "variable" },
+          qName: SPIKE_VARIABLE_NAME,
+          qDefinition: "1",
+          qComment: "spike",
+        }),
+      get: () => doc.getVariableById(SPIKE_IDS.variable),
+      destroy: () => doc.destroyVariableById(SPIKE_IDS.variable),
+    },
+  ];
+}
+
+/** Creates one spike object and reads its id back; records into `r`. Returns whether the id was kept. */
+async function createAndReadBack(s: SpikeObjectSpec, r: Record<string, unknown>): Promise<boolean> {
+  try {
+    const obj = await step(s.create(), `Create ${s.kind}`);
+    r.createdHandleId = obj?.id ?? null;
+    const back = await step(s.get(), `read back ${s.kind}`);
+    const info = (await step(back.getInfo(), `GetInfo ${s.kind}`)) as NxInfo;
+    r.readBackId = info?.qId ?? null;
+    r.readBackType = info?.qType ?? null;
+    r.idKept = info?.qId === s.id;
+    return r.idKept === true;
+  } catch (e) {
+    r.error = describeError(e);
+    return false;
+  }
+}
+
+/** Closes P9's session and deletes the app P9 created; safe to call more than once. */
+function cleanupNewApp(ctx: Context, ev: Evidence): Promise<void> {
+  const st = ctx.newApp;
+  if (!st) return Promise.resolve();
+  st.chain = st.chain.then(async () => {
+    const session = st.session;
+    st.session = null;
+    await closeQuietly(session);
+    // Only the app this run created, and never the app the probes run in.
+    if (st.id && !st.deleted && st.id !== ctx.loc.appId) {
+      if (ctx.global) {
+        try {
+          const res = (await step(ctx.global.deleteApp(st.id), `DeleteApp ${st.id}`)) as unknown;
+          const success = res === true || (res as { qSuccess?: boolean } | null)?.qSuccess === true;
+          if (success) {
+            st.deleted = true;
+            st.deleteVia = "engine DeleteApp";
+          } else {
+            st.deleteErrors.push(`engine DeleteApp returned ${JSON.stringify(res)}`);
+          }
+        } catch (e) {
+          st.deleteErrors.push(`engine DeleteApp: ${describeError(e)}`);
+        }
+      }
+      if (!st.deleted) {
+        const del = await qrs(ctx, "DELETE", `app/${st.id}`);
+        if (del.result.ok) {
+          st.deleted = true;
+          st.deleteVia = "QRS DELETE app";
+        } else {
+          st.deleteErrors.push(`QRS DELETE app: ${del.result.status ?? del.result.error} ${del.result.bodySnippet ?? ""}`.trim());
+        }
+      }
+    }
+    ev.newApp = { name: st.name, id: st.id, deleted: st.deleted, deleteVia: st.deleteVia, deleteErrors: st.deleteErrors };
+  });
+  return st.chain;
+}
+
+const P9: ProbeDef = {
+  id: "P9",
+  question: "In a new app: are given qIds kept for all object types, and does a story survive GetFullPropertyTree -> SetFullPropertyTree?",
+  timeoutMs: 240_000,
+  needsEngine: true,
+  async run(ctx, ev, cancel) {
+    const global = ctx.global;
+    if (!global) throw new Error("no engine global available");
+    const st: NewAppState = {
+      name: `spike-probe-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+      id: null,
+      session: null,
+      deleted: false,
+      deleteVia: null,
+      deleteErrors: [],
+      chain: Promise.resolve(),
+    };
+    ctx.newApp = st;
+    ev.newApp = { name: st.name, id: null, deleted: false };
+    let result: { ok: boolean; detail: string };
+    try {
+      result = await runNewAppSteps(ctx, ev, cancel, global, st);
+    } finally {
+      // 4. Always close and delete, also after an error; the runner calls this again after a timeout.
+      await cleanupNewApp(ctx, ev);
+    }
+    const leftover = st.id ? `app NOT deleted, remove by hand: "${st.name}" (${st.id})` : `if an app "${st.name}" exists, remove it by hand`;
+    return { ok: result.ok && st.deleted, detail: `${result.detail}; ${st.deleted ? "app deleted" : leftover}` };
+  },
+  async cleanup(ctx, ev) {
+    await cleanupNewApp(ctx, ev);
+  },
+};
+
+async function runNewAppSteps(ctx: Context, ev: Evidence, cancel: CancelToken, global: EngineApi, st: NewAppState): Promise<{ ok: boolean; detail: string }> {
+  // 1. Create the app through the engine global (lands in the user's work area).
+  const created = (await step(global.createApp(st.name), "CreateApp")) as unknown;
+  const appId = typeof created === "string" ? created : (created as { qAppId?: string } | null)?.qAppId;
+  ev.createAppSuccess = (created as { qSuccess?: boolean } | null)?.qSuccess ?? null;
+  if (typeof appId !== "string" || appId === "") throw new Error(`CreateApp returned no app id: ${JSON.stringify(created)}`);
+  st.id = appId;
+  ev.newApp = { name: st.name, id: st.id, deleted: false };
+  if (cancel.cancelled) return { ok: false, detail: "cancelled after CreateApp" };
+
+  // 2. Open it in its own session, the same way P1 opened the current app.
+  const url = engineUrl(ctx, appId, ctx.sessionUsesToken);
+  ev.url = url.shown;
+  const opened = await openEngineSession(url.url, "session.open new app", [], []);
+  st.session = opened.session;
+  let newDoc: EngineApi | null = null;
+  const openErrors: string[] = [];
+  for (let attempt = 1; attempt <= 3 && !newDoc && !cancel.cancelled; attempt++) {
+    try {
+      newDoc = await step(opened.global.openDoc(appId), `OpenDoc new app (attempt ${attempt})`);
+    } catch (e) {
+      openErrors.push(describeError(e));
+      await sleep(2_000); // a freshly created app may need a moment before it can be opened
+    }
+  }
+  ev.openDocErrors = openErrors;
+  if (!newDoc) throw new Error(`new app could not be opened: ${openErrors.join(" | ")}`);
+
+  const perType: Record<string, unknown> = {};
+  let allKept = true;
+  for (const spec of spikeObjectSpecs(newDoc)) {
+    if (cancel.cancelled) break;
+    const r: Record<string, unknown> = { requestedId: spec.id };
+    perType[spec.kind] = r;
+    if (!(await createAndReadBack(spec, r))) allKept = false;
+  }
+  ev.perType = perType;
+
+  // 3. Copy the first story of the current app (with its snapshots) into the new app.
+  let storyOk = true;
+  if (!ctx.storyId) {
+    ev.story = ctx.storyCount === 0 ? "skipped: no story in this app" : "skipped: no story in this app (P6 did not finish)";
+  } else if (!cancel.cancelled) {
+    const story: Record<string, unknown> = { id: ctx.storyId };
+    ev.story = story;
+    try {
+      const doc = requireDoc(ctx);
+      const source: EngineApi = await step(doc.getObject(ctx.storyId), `GetObject ${ctx.storyId}`);
+      const tree = await step(source.getFullPropertyTree(), "GetFullPropertyTree (source)", 60_000);
+      const target: EngineApi = await step(newDoc.createObject({ qInfo: { qId: ctx.storyId, qType: "story" } }), "CreateObject story (copy)");
+      await step(target.setFullPropertyTree(tree), "SetFullPropertyTree", 60_000);
+      const back = await step(target.getFullPropertyTree(), "GetFullPropertyTree (copy)", 60_000);
+      story.equal = JSON.stringify(tree, null, 2) === JSON.stringify(back, null, 2);
+      story.firstDifferingPath = story.equal ? null : firstDiffPath(tree, back) ?? "(string differs, no structural diff)";
+      story.embeddedSnapshotDefsSource = countKey(tree, "qEmbeddedSnapshotDef");
+      story.embeddedSnapshotDefsCopy = countKey(back, "qEmbeddedSnapshotDef");
+      story.sizeBytesSource = byteSize(tree);
+      story.sizeBytesCopy = byteSize(back);
+      storyOk = story.equal === true;
+    } catch (e) {
+      story.error = describeError(e);
+      storyOk = false;
+    }
+  }
+  return {
+    ok: allKept && storyOk,
+    detail: `${allKept ? "all types kept the given qId" : "at least one type did not keep the qId (see evidence)"}; story ${
+      typeof ev.story === "string" ? ev.story : storyOk ? "copied unchanged" : "differs or failed (see evidence)"}`,
+  };
+}
+
 const P2: ProbeDef = {
   id: "P2",
-  question: "Does the engine keep a given qInfo.qId on CreateDimension, CreateMeasure and CreateObject (masterobject, sheet)?",
-  timeoutMs: 120_000,
+  question: "Does the engine keep a given qInfo.qId on CreateDimension, CreateMeasure, CreateVariableEx and CreateObject (masterobject, sheet, story)?",
+  timeoutMs: 180_000,
   needsEngine: true,
   async run(ctx, ev, cancel) {
     const doc = requireDoc(ctx);
-    type Kind = "dimension" | "measure" | "masterobject" | "sheet";
-    const specs: { kind: Kind; id: string; create: () => Promise<EngineApi>; get: () => Promise<EngineApi>; destroy: () => Promise<unknown> }[] = [
-      {
-        kind: "dimension",
-        id: SPIKE_IDS.dimension,
-        create: () =>
-          doc.createDimension({
-            qInfo: { qId: SPIKE_IDS.dimension, qType: "dimension" },
-            qDim: { qGrouping: "N", qFieldDefs: ["=1"], qFieldLabels: ["spike"], qLabelExpression: "" },
-            qMetaDef: { title: "spike-dimension" },
-          }),
-        get: () => doc.getDimension(SPIKE_IDS.dimension),
-        destroy: () => doc.destroyDimension(SPIKE_IDS.dimension),
-      },
-      {
-        kind: "measure",
-        id: SPIKE_IDS.measure,
-        create: () =>
-          doc.createMeasure({
-            qInfo: { qId: SPIKE_IDS.measure, qType: "measure" },
-            qMeasure: { qLabel: "spike", qDef: "=1", qGrouping: "N", qExpressions: [], qActiveExpression: 0, qLabelExpression: "" },
-            qMetaDef: { title: "spike-measure" },
-          }),
-        get: () => doc.getMeasure(SPIKE_IDS.measure),
-        destroy: () => doc.destroyMeasure(SPIKE_IDS.measure),
-      },
-      {
-        kind: "masterobject",
-        id: SPIKE_IDS.masterobject,
-        create: () =>
-          doc.createObject({
-            qInfo: { qId: SPIKE_IDS.masterobject, qType: "masterobject" },
-            qMetaDef: { title: "spike-masterobject" },
-            visualization: "text-image",
-            markdown: "spike",
-          }),
-        get: () => doc.getObject(SPIKE_IDS.masterobject),
-        destroy: () => doc.destroyObject(SPIKE_IDS.masterobject),
-      },
-      {
-        kind: "sheet",
-        id: SPIKE_IDS.sheet,
-        create: () =>
-          doc.createObject({
-            qInfo: { qId: SPIKE_IDS.sheet, qType: "sheet" },
-            qMetaDef: { title: "spike-sheet", description: "" },
-            rank: 9999,
-            columns: 24,
-            rows: 12,
-            cells: [],
-            qChildListDef: { qData: { title: "/title" } },
-          }),
-        get: () => doc.getObject(SPIKE_IDS.sheet),
-        destroy: () => doc.destroyObject(SPIKE_IDS.sheet),
-      },
-    ];
-
+    const specs = spikeObjectSpecs(doc);
     const perType: Record<string, unknown> = {};
     let allKept = true;
     const cleanupFailures: string[] = [];
@@ -690,17 +1212,7 @@ const P2: ProbeDef = {
         /* not present */
       }
       try {
-        const obj = await step(s.create(), `Create ${s.kind}`);
-        r.createdHandleId = obj?.id ?? null;
-        const back = await step(s.get(), `read back ${s.kind}`);
-        const info = (await step(back.getInfo(), `GetInfo ${s.kind}`)) as NxInfo;
-        r.readBackId = info?.qId ?? null;
-        r.readBackType = info?.qType ?? null;
-        r.idKept = info?.qId === s.id;
-        if (!r.idKept) allKept = false;
-      } catch (e) {
-        r.error = describeError(e);
-        allKept = false;
+        if (!(await createAndReadBack(s, r))) allKept = false;
       } finally {
         // Always attempt cleanup, also when create/read-back failed or timed out midway.
         try {
@@ -714,7 +1226,7 @@ const P2: ProbeDef = {
     }
     ev.perType = perType;
     ev.cleanupFailures = cleanupFailures;
-    const parts = [allKept ? "all four types kept the given qId" : "at least one type did not keep the qId or failed (see evidence)"];
+    const parts = [allKept ? `all ${specs.length} types kept the given qId` : "at least one type did not keep the qId or failed (see evidence)"];
     if (cleanupFailures.length) parts.push(`cleanup FAILED for ${cleanupFailures.join(", ")}`);
     return { ok: allKept && cleanupFailures.length === 0, detail: parts.join("; ") };
   },
@@ -865,7 +1377,7 @@ const P7: ProbeDef = {
 };
 
 /** Execution order as decided for the spike. */
-const PROBES: ProbeDef[] = [P11, P1, P4, P6, P10, P8, P2, P5, P3, P7];
+const PROBES: ProbeDef[] = [P11, P1, P4, P6, P9, P10, P8, P2, P5, P3, P7];
 
 // ---------------------------------------------------------------------------
 // Runner
@@ -876,6 +1388,7 @@ export async function runProbes(loc: AppLocation, onProgress: (text: string) => 
     virtualProxyPrefix: loc.prefix,
     appId: loc.appId,
     includeDoSave: options.includeDoSave,
+    includeNewApp: options.includeNewApp,
     startedAt: new Date().toISOString(),
     finishedAt: "",
     probes: [],
@@ -883,12 +1396,16 @@ export async function runProbes(loc: AppLocation, onProgress: (text: string) => 
   const ctx: Context = {
     loc,
     csrfToken: null,
+    sessionUsesToken: false,
     session: null,
     global: null,
     doc: null,
     engineUnavailable: null,
     notifications: [],
     sessionEvents: [],
+    storyCount: null,
+    storyId: null,
+    newApp: null,
   };
 
   for (const [index, probe] of PROBES.entries()) {
@@ -899,6 +1416,8 @@ export async function runProbes(loc: AppLocation, onProgress: (text: string) => 
     let detail = "";
     if (probe.id === "P7" && !options.includeDoSave) {
       detail = "skipped: DoSave probe not selected";
+    } else if (probe.id === "P9" && !options.includeNewApp) {
+      detail = "skipped: new-app probe not selected";
     } else if (probe.needsEngine && ctx.engineUnavailable) {
       detail = `skipped: ${ctx.engineUnavailable}`;
     } else {
@@ -910,6 +1429,13 @@ export async function runProbes(loc: AppLocation, onProgress: (text: string) => 
       } catch (e) {
         cancel.cancelled = true;
         detail = `${e instanceof TimeoutError ? "timeout" : "error"}: ${describeError(e)}`;
+      }
+      if (probe.cleanup) {
+        try {
+          await withTimeout(probe.cleanup(ctx, ev), 90_000, `${probe.id} cleanup`);
+        } catch (e) {
+          ev.cleanupError = describeError(e);
+        }
       }
     }
     if (probe.id === "P1" && !ctx.doc) {
@@ -929,5 +1455,6 @@ export async function runProbes(loc: AppLocation, onProgress: (text: string) => 
   const p1 = report.probes.find((p) => p.id === "P1");
   if (p1) p1.evidence.sessionEvents = ctx.sessionEvents;
   report.finishedAt = new Date().toISOString();
-  return report;
+  // The token value must never reach the report, whatever an error message may have echoed.
+  return ctx.csrfToken ? scrubToken(report, ctx.csrfToken) : report;
 }
