@@ -96,3 +96,50 @@ test("slash branch names, list mappings, non-not-found errors propagate, many bl
   await commitFiles(c, "lr-bicc/demo", { branch: "feature/x", parentSha: "p1", message: "m", changes });
   expect(m.calls.filter(x => x.url.endsWith("/git/blobs")).length).toBe(12);
 });
+test("tree entries map each path to the sha of its own blob, even when blobs finish out of order", async () => {
+  const changes = [
+    { path: "objects/sheets/a.json", content: "{\"a\":1}" },
+    { path: "objects/sheets/b.json", content: "{\"b\":2}" },
+    { path: "objects/sheets/gone.json", content: null },
+    { path: "appcontent/logo.png", content: new Uint8Array([1, 2, 3]) },
+    { path: "data_load_script/Main.qvs", content: "///$tab Main\r\nSET a=1;" },
+    { path: "objects/measures/m.json", content: "{\"m\":3}" },
+    { path: "objects/variables/v.json", content: "{\"v\":4}" },
+    { path: "objects/dimensions/d.json", content: "{\"d\":5}" },
+  ];
+  const expectedBlobs = changes.filter((ch) => ch.content !== null).length;
+  const shaOf = (body: { content: string; encoding: string }) => `sha(${body.encoding}:${body.content})`;
+  let inFlight = 0, peak = 0, received = 0;
+  let pending: (() => void)[] = [];
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/blobs`]: (req) => new Promise((resolve) => {
+      inFlight++; received++; peak = Math.max(peak, inFlight);
+      pending.push(() => { inFlight--; resolve({ status: 201, body: { sha: shaOf(req.body as { content: string; encoding: string }) } }); });
+      // Hold requests until the pool is full (or the last one arrived), then answer newest first.
+      if (pending.length === 5 || received === expectedBlobs) {
+        const batch = pending.reverse(); pending = [];
+        setTimeout(() => batch.forEach((answer) => answer()), 0);
+      }
+    }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: "t1" } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  await commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m", changes });
+  const tree = (m.calls.find(x => x.url.endsWith("/git/trees"))!.body as { tree: unknown[] }).tree;
+  const blob = (path: string, sha: string | null) => ({ path, mode: "100644", type: "blob", sha });
+  expect(tree).toEqual([
+    blob("objects/sheets/a.json", "sha(utf-8:{\"a\":1})"),
+    blob("objects/sheets/b.json", "sha(utf-8:{\"b\":2})"),
+    blob("objects/sheets/gone.json", null),
+    blob("appcontent/logo.png", "sha(base64:AQID)"),
+    blob("data_load_script/Main.qvs", "sha(utf-8:///$tab Main\r\nSET a=1;)"),
+    blob("objects/measures/m.json", "sha(utf-8:{\"m\":3})"),
+    blob("objects/variables/v.json", "sha(utf-8:{\"v\":4})"),
+    blob("objects/dimensions/d.json", "sha(utf-8:{\"d\":5})"),
+  ]);
+  expect(received).toBe(expectedBlobs);
+  expect(peak).toBeLessThanOrEqual(5);
+});

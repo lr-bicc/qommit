@@ -2,10 +2,12 @@ import type { FileContent, FileMap } from "./types";
 import { TAB_ORDER_PATH, TAB_DIVIDER } from "./script-tabs";
 import { groupOf } from "./diff";
 
-export type TargetProblemReason = "invalid-json" | "conflict-markers" | "missing-tab-file" | "unlisted-tab-file";
+export type TargetProblemReason =
+  | "invalid-json" | "conflict-markers" | "missing-tab-file" | "unlisted-tab-file" | "missing-tab-order" | "invalid-object";
 export interface TargetProblem { path: string; reason: TargetProblemReason }
 
 const TAB_DIR = "data_load_script/";
+const TREE_GROUPS: ReadonlySet<string> = new Set(["masterobjects", "sheets", "stories"]);
 
 function asText(content: FileContent): string {
   return typeof content === "string" ? content : new TextDecoder("utf-8").decode(content);
@@ -16,8 +18,30 @@ function hasConflictMarkers(text: string): boolean {
   return text.split("\n").some((line) => line.startsWith("<<<<<<< ") || line.startsWith(">>>>>>> "));
 }
 
-function isValidJson(text: string): boolean {
-  try { JSON.parse(text); return true; } catch { return false; }
+/** Parses JSON; `undefined` means the text is not valid JSON (JSON itself has no undefined). */
+function parseJson(text: string): unknown {
+  try { return JSON.parse(text) as unknown; } catch { return undefined; }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function idOfGeneric(value: unknown): unknown {
+  return isRecord(value) && isRecord(value.qInfo) ? value.qInfo.qId : undefined;
+}
+
+// The planner tells trees from generic objects by `qChildren`, so a tree without it would be misread.
+function idOfTree(value: unknown): unknown {
+  return isRecord(value) && Array.isArray(value.qChildren) ? idOfGeneric(value.qProperty) : undefined;
+}
+
+/** True when a parsed file has the shape the deserializer and the update planner rely on. */
+function isValidObject(path: string, group: string, value: unknown): boolean {
+  if (group === "appprops") return Array.isArray(value) && value.every((t) => typeof idOfTree(t) === "string");
+  const baseName = path.slice(path.lastIndexOf("/") + 1, -".json".length);
+  const id = TREE_GROUPS.has(group) ? idOfTree(value) : idOfGeneric(value);
+  return typeof id === "string" && id === baseName;
 }
 
 /** Checks every maintained file of a target snapshot; returns problems sorted by path (empty = fine). */
@@ -28,13 +52,19 @@ export function validateTarget(files: FileMap): TargetProblem[] {
     const group = groupOf(path);
     if (group === null || group === "attachedFiles") continue;
     const text = asText(content);
-    if (hasConflictMarkers(text)) problems.set(path, "conflict-markers");
-    else if (path.endsWith(".json") && !isValidJson(text)) problems.set(path, "invalid-json");
+    if (hasConflictMarkers(text)) { problems.set(path, "conflict-markers"); continue; }
+    if (!path.endsWith(".json")) continue;
+    const value = parseJson(text);
+    if (value === undefined) problems.set(path, "invalid-json");
+    else if (!isValidObject(path, group, value)) problems.set(path, "invalid-object");
   }
 
   const order = files.get(TAB_ORDER_PATH);
   const listed = new Set<string>();
-  if (order !== undefined) {
+  // Without the order file the script would be restored as empty, wiping the app's load script.
+  if (order === undefined) {
+    problems.set(TAB_ORDER_PATH, "missing-tab-order");
+  } else {
     const orderText = asText(order);
     if (orderText !== "") {
       for (const name of orderText.split(TAB_DIVIDER)) listed.add(`${TAB_DIR}${name}.qvs`);

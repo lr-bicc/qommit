@@ -33,11 +33,17 @@ function errorMessagesOf(body: unknown): string[] {
   return errors.map((e) => (typeof (e as { message?: unknown })?.message === "string" ? (e as { message: string }).message : ""));
 }
 
+function numberHeader(headers: Headers, name: string): number | undefined {
+  const value = headers.get(name);
+  return value !== null && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined;
+}
+
+// retry-after (secondary limits) wins; the primary reset time only applies once the quota is used up.
 function resetAtOf(headers: Headers): Date | undefined {
-  const reset = headers.get("x-ratelimit-reset");
-  if (reset !== null && reset.trim() !== "" && Number.isFinite(Number(reset))) return new Date(Number(reset) * 1000);
-  const retry = headers.get("retry-after");
-  if (retry !== null && retry.trim() !== "" && Number.isFinite(Number(retry))) return new Date(Date.now() + Number(retry) * 1000);
+  const retry = numberHeader(headers, "retry-after");
+  if (retry !== undefined) return new Date(Date.now() + retry * 1000);
+  const reset = numberHeader(headers, "x-ratelimit-reset");
+  if (reset !== undefined && headers.get("x-ratelimit-remaining") === "0") return new Date(reset * 1000);
   return undefined;
 }
 
@@ -57,13 +63,16 @@ export function toGitHubError(status: number, headers: Headers, body: unknown): 
 
   if (
     (status === 403 || status === 429) &&
-    (headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after"))
+    (headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after") || lower.includes("secondary rate limit"))
   ) {
     const resetAt = resetAtOf(headers);
     return new GitHubError("rate-limited", status, text, resetAt ? { resetAt } : {});
   }
 
-  if (lower.includes("protected branch")) return new GitHubError("protected-branch", status, text);
+  // Classic branch protection and repository rulesets ("Changes must be made through a pull request.").
+  if (lower.includes("protected branch") || lower.includes("changes must be made through a pull request")) {
+    return new GitHubError("protected-branch", status, text);
+  }
 
   if (status === 422) {
     if (lower.includes("not a fast forward")) return new GitHubError("not-fast-forward", status, text);

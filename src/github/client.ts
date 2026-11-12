@@ -42,9 +42,19 @@ export function createGitHubClient(opts: { token: string; fetch?: typeof fetch; 
     return res;
   }
 
+  // A 2xx answer can still be a proxy or captive-portal page; its text never goes into the error.
   async function json<T>(res: Response): Promise<T> {
-    const text = res.status === 204 ? "" : await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
+    let text: string;
+    try {
+      text = res.status === 204 ? "" : await res.text();
+    } catch {
+      throw new GitHubError("unknown", res.status, "Reading the GitHub response failed");
+    }
+    try {
+      return (text ? JSON.parse(text) : undefined) as T;
+    } catch {
+      throw new GitHubError("unknown", res.status, "GitHub response is not valid JSON");
+    }
   }
 
   return {
@@ -52,7 +62,12 @@ export function createGitHubClient(opts: { token: string; fetch?: typeof fetch; 
       return json<T>(await send(method, path, body));
     },
     async raw(path) {
-      return new Uint8Array(await (await send("GET", path)).arrayBuffer());
+      const res = await send("GET", path);
+      try {
+        return new Uint8Array(await res.arrayBuffer());
+      } catch {
+        throw new GitHubError("unknown", res.status, "Reading the GitHub response failed");
+      }
     },
     async graphql<T>(query: string, variables: Record<string, unknown>) {
       const res = await json<{ data?: T; errors?: { message?: string }[] }>(await send("POST", "/graphql", { query, variables }));

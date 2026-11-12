@@ -100,3 +100,60 @@ test("network failures and token hygiene", async () => {
   expect(e.status).toBe(0);
   expect(e.message).not.toContain("T0KEN");
 });
+
+test("retry-after wins over x-ratelimit-reset; the reset time counts only when nothing remains", async () => {
+  const reset = "1800000000";
+  const m = mockFetch({
+    "GET /a": () => ({ status: 403, body: { message: "secondary" }, headers: { "retry-after": "60", "x-ratelimit-remaining": "4999", "x-ratelimit-reset": reset } }),
+    "GET /b": () => ({ status: 429, body: { message: "slow" }, headers: { "retry-after": "60", "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset } }),
+    "GET /c": () => ({ status: 403, body: { message: "You have exceeded a secondary rate limit" }, headers: { "x-ratelimit-remaining": "12", "x-ratelimit-reset": reset } }),
+  });
+  const c = createGitHubClient({ token: "T0KEN", fetch: m.fetch });
+  for (const path of ["/a", "/b"]) {
+    const before = Date.now();
+    const e = await errOf(c.rest("GET", path));
+    expect(e.kind).toBe("rate-limited");
+    expect(e.extra.resetAt!.getTime()).toBeGreaterThanOrEqual(before + 60_000);
+    expect(e.extra.resetAt!.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
+  }
+  const e = await errOf(c.rest("GET", "/c"));
+  expect(e.kind).toBe("rate-limited");
+  expect(e.extra.resetAt).toBeUndefined();
+});
+
+test("a secondary rate limit without retry-after is rate-limited, not forbidden", async () => {
+  const m = mockFetch({
+    "GET /s": () => ({ status: 403, body: { message: "You have exceeded a secondary rate limit. Please wait a few minutes before you try again." } }),
+  });
+  const e = await errOf(createGitHubClient({ token: "T0KEN", fetch: m.fetch }).rest("GET", "/s"));
+  expect(e.kind).toBe("rate-limited");
+});
+
+test("a ref update refused by a repository ruleset is protected-branch", async () => {
+  const m = mockFetch({
+    "PATCH /r": () => ({ status: 422, body: { message: "Repository rule violations found\n\nChanges must be made through a pull request.\n\n" } }),
+  });
+  expect(await kindOf(createGitHubClient({ token: "T0KEN", fetch: m.fetch }).rest("PATCH", "/r", {}))).toBe("protected-branch");
+});
+
+test("a 2xx body that is not JSON or cannot be read becomes a GitHubError without the body text", async () => {
+  const proxyPage = "<html>Proxy login SECRET-PAGE</html>";
+  const html = (async () => new Response(proxyPage, { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
+  const viaHtml = createGitHubClient({ token: "T0KEN", fetch: html });
+  for (const call of [() => viaHtml.rest("GET", "/user"), () => viaHtml.graphql("q", {})]) {
+    const e = await errOf(call());
+    expect(e).toBeInstanceOf(GitHubError);
+    expect([e.kind, e.status]).toEqual(["unknown", 200]);
+    expect(e.message).not.toContain("SECRET-PAGE");
+    expect(e.message).not.toContain("T0KEN");
+  }
+  const broken = (async () => new Response(new ReadableStream({ start(ctl) { ctl.error(new Error("reset T0KEN")); } }),
+    { status: 200 })) as typeof fetch;
+  const viaBroken = createGitHubClient({ token: "T0KEN", fetch: broken });
+  for (const call of [() => viaBroken.rest("GET", "/user"), () => viaBroken.raw("/zip")]) {
+    const e = await errOf(call());
+    expect(e).toBeInstanceOf(GitHubError);
+    expect(e.kind).toBe("unknown");
+    expect(e.message).not.toContain("T0KEN");
+  }
+});

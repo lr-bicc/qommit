@@ -57,7 +57,7 @@ async function* orgRepoNodes(c: GitHubClient, org: string): AsyncGenerator<RepoN
     const data: OrgReposResponse = await c.graphql<OrgReposResponse>(ORG_REPOS_QUERY, { org, cursor });
     const { nodes, pageInfo } = data.organization.repositories;
     for (const n of nodes) if (n) yield n;
-    if (!pageInfo.hasNextPage) return;
+    if (!pageInfo.hasNextPage || pageInfo.endCursor === null) return; // a null cursor would restart at page one
     cursor = pageInfo.endCursor;
   }
 }

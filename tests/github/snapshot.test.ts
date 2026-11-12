@@ -1,5 +1,5 @@
 import { zipSync, strToU8 } from "fflate";
-import { downloadSnapshot, createRepo, findRepoForApp } from "../../src/github/snapshot";
+import { downloadSnapshot, createRepo, findRepoForApp, listOrgRepos } from "../../src/github/snapshot";
 import type { GitHubClient } from "../../src/github/client";
 
 const fake = (over: Partial<GitHubClient>): GitHubClient => ({
@@ -34,4 +34,14 @@ test("finds the repository and branch of an app across pages", async () => {
     : page([{ nameWithOwner: "lr-bicc/demo", defaultBranchRef: { name: "main" }, object: { text: table } }], null)) as GitHubClient["graphql"] });
   expect(await findRepoForApp(c, "lr-bicc", id)).toEqual({ repo: "lr-bicc/demo", branch: "feature" });
   expect(await findRepoForApp(c, "lr-bicc", "00000000-0000-4000-8000-000000000000")).toBeNull();
+});
+test("the repository pager stops when GitHub sends no end cursor", async () => {
+  let calls = 0;
+  const c = fake({ graphql: (async () => {
+    if (++calls > 3) throw new Error("pager did not stop");
+    return { organization: { repositories: { pageInfo: { hasNextPage: true, endCursor: null },
+      nodes: [{ nameWithOwner: "lr-bicc/demo", defaultBranchRef: { name: "main" }, object: null }] } } };
+  }) as GitHubClient["graphql"] });
+  expect(await listOrgRepos(c, "lr-bicc")).toEqual([{ repo: "lr-bicc/demo", defaultBranch: "main" }]);
+  expect(calls).toBe(1);
 });
