@@ -1,6 +1,6 @@
 # Runbook: Spike gegen den Qlik-Testserver
 
-Wegwerf-Extension „Qlik Git Spike“. Sie blendet auf App-Seiten von `https://lr-analytics-test.lrworld.com` unten links den Button **„Run spike probes“** und daneben zwei Checkboxen ein:
+Wegwerf-Extension „Qommit Spike“. Sie blendet auf App-Seiten von `https://lr-analytics-test.lrworld.com` unten links den Button **„Run spike probes“** und daneben zwei Checkboxen ein:
 
 - **„Include DoSave probe (P7)“** – standardmäßig **nicht** angehakt. Ohne Haken wird P7 als „skipped: DoSave probe not selected“ berichtet.
 - **„Include new-app probe (P9)“** – standardmäßig **angehakt**. Ohne Haken wird P9 als „skipped: new-app probe not selected“ berichtet.
@@ -69,13 +69,13 @@ In einer der Kopien (oder der veröffentlichten App) in der Oberfläche nachsehe
 
 1. Kopie 1, Kopie 2, Kopie 3 und die Wegwerf-App (im Stream, ggf. über die QMC) löschen.
 2. Im Hub unter „Meine Arbeit“ nach Apps suchen, deren Name mit `spike-probe-` beginnt, und sie löschen, falls noch welche da sind (siehe „Wenn etwas nicht klappt“).
-3. In `chrome://extensions` die Extension „Qlik Git Spike“ entfernen.
+3. In `chrome://extensions` die Extension „Qommit Spike“ entfernen.
 4. Die Berichte **A, A2, B1, B und C** sowie die Notiz aus Schritt 6 übergeben.
 
 ## Wenn etwas nicht klappt
 
 - **Kein Button:** Er erscheint nur auf App-Seiten (URL enthält `/sense/app/<App-ID>`). Seite neu laden; prüfen, ob die Extension in `chrome://extensions` aktiv ist und nach einem Neubau dort auf „Neu laden“ geklickt wurde.
-- **Kein Download:** Der Bericht steht zusätzlich in der DevTools-Konsole (F12 → Console) unter `[qlik-git-spike] report`. Den JSON-Text kopieren und als Datei speichern.
+- **Kein Download:** Der Bericht steht zusätzlich in der DevTools-Konsole (F12 → Console) unter `[qommit-spike] report`. Den JSON-Text kopieren und als Datei speichern.
 - **P7 „skipped: DoSave probe not selected“:** Die Checkbox war nicht angehakt. In A, A2 und B ist das richtig; in B1 und C den Lauf mit Haken wiederholen.
 - **P9 „skipped: new-app probe not selected“:** Die Checkbox „Include new-app probe (P9)“ war nicht angehakt. Den Bericht trotzdem abgeben; P9 muss nur in mindestens einem Bericht gelaufen sein.
 - **P9 meldet `"deleted": false`:** Die neue App konnte nicht gelöscht werden. Name und ID stehen in P9 unter `newApp` (auch in `detail`). Die App im Hub unter „Meine Arbeit“ (oder in der QMC unter „Apps“) suchen und von Hand löschen. Gelöscht wird ausschließlich diese eine App mit dem Namen `spike-probe-…`, nie eine andere.

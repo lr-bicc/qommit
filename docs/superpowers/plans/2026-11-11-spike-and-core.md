@@ -1,4 +1,4 @@
-# Qlik Git Extension – Plan 1 von 2: Spike und Kernbibliothek
+# Qommit – Plan 1 von 2: Spike und Kernbibliothek
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -150,7 +150,7 @@ Wegwerf-Code. Ergebnis ist `docs/superpowers/spike/results.md`, nicht der Code. 
 **Interfaces:**
 - Produces: JSON-Bericht `{ server, appId, startedAt, probes: [{ id, question, ok, detail, evidence }] }`, heruntergeladen als `spike-report-<timestamp>.json`.
 
-- [ ] **Step 1: Extension-Hülle.** `spike/manifest.json` (Manifest V3, Name „Qlik Git Spike“, `content_scripts` für `https://lr-analytics-test.lrworld.com/*`, `js: ["dist/content.js"]`, `run_at: document_idle`, keine weiteren Berechtigungen). `spike/build.mjs` bündelt `spike/src/content.ts` mit esbuild nach `spike/dist/content.js` (IIFE). Das Content Script blendet auf App-Seiten (`/sense/app/<id>`) unten links einen Button „Run spike probes“ ein, der `runProbes()` ausführt und den Bericht als Datei herunterlädt.
+- [ ] **Step 1: Extension-Hülle.** `spike/manifest.json` (Manifest V3, Name „Qommit Spike“, `content_scripts` für `https://lr-analytics-test.lrworld.com/*`, `js: ["dist/content.js"]`, `run_at: document_idle`, keine weiteren Berechtigungen). `spike/build.mjs` bündelt `spike/src/content.ts` mit esbuild nach `spike/dist/content.js` (IIFE). Das Content Script blendet auf App-Seiten (`/sense/app/<id>`) unten links einen Button „Run spike probes“ ein, der `runProbes()` ausführt und den Bericht als Datei herunterlädt.
 
 - [ ] **Step 2: Probes in `spike/src/probes.ts`.** Jede Probe fängt Fehler ab und schreibt `ok`, `detail` und `evidence`. Alle angelegten Objekte tragen IDs mit Präfix `spike-` und werden am Ende wieder gelöscht. URL-Bestandteile (Host, Virtual-Proxy-Präfix, App-ID) werden aus `location` abgeleitet.
 

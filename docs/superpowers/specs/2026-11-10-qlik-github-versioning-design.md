@@ -1,5 +1,6 @@
-# Design: Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
+# Design: Qommit – Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
+- **Name des Tools:** Qommit (Paket- und Repo-Name `qommit`, Repo `lr-bicc/qommit`)
 - **Datum:** 2026-11-11 (Revision 8)
 - **Status:** Entwurf zur Freigabe
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend

@@ -2,7 +2,7 @@
 // runs the probes and downloads the JSON report.
 import { parseAppLocation, runProbes, type SpikeReport } from "./probes";
 
-const CONTAINER_ID = "qlik-git-spike";
+const CONTAINER_ID = "qommit-spike";
 const LABEL = "Run spike probes";
 const DOSAVE_LABEL = "Include DoSave probe (P7)";
 const NEWAPP_LABEL = "Include new-app probe (P9)";
@@ -12,7 +12,7 @@ let running = false;
 function downloadReport(report: SpikeReport): void {
   const json = JSON.stringify(report, null, 2);
   // Fallback in case the download is blocked: the report is also in the console.
-  console.log("[qlik-git-spike] report", json);
+  console.log("[qommit-spike] report", json);
   const stamp = report.startedAt.replace(/[:.]/g, "-");
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);

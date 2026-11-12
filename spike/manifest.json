@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Qlik Git Spike",
+  "name": "Qommit Spike",
   "version": "0.0.1",
   "description": "Throwaway spike: runs feasibility probes against the Qlik Sense test server and downloads a JSON report.",
   "content_scripts": [
