@@ -139,7 +139,7 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 ## 5. Verknüpfung App ↔ Repo ↔ Branch
 
 ### In der App: Link-Objekt
-Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt vom Typ `git-link` an:
+Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt vom Typ `qommit-link` an:
 ```json
 { "repo": "lr-bicc/supply-chain-performance", "branch": "forecast-and-nordics", "appId": "<ID der App, die zuletzt gespeichert hat>", "syncedSha": "<Commit, auf dem die App steht>" }
 ```
@@ -271,7 +271,7 @@ Mehrere Annahmen lassen sich nur am echten Server prüfen. Der erste Schritt des
 
 1. Akzeptiert der Virtual Proxy eine WebSocket-Verbindung aus dem Content Script?
 2. Lassen sich Dimensionen, Measures, Master-Visualisierungen, Sheets und Stories mit vorgegebener `qId` anlegen, in derselben und in einer neuen App?
-3. Wird ein generisches Objekt vom Typ `git-link` beim Duplizieren mitkopiert, bleibt es ohne `DoSave` erhalten, und ist es in der Qlik-Oberfläche unsichtbar?
+3. Wird ein generisches Objekt vom Typ `qommit-link` beim Duplizieren mitkopiert, bleibt es ohne `DoSave` erhalten, und ist es in der Qlik-Oberfläche unsichtbar?
 4. Liefert die Engine bei zwei Lesevorgängen ohne Änderung byte-gleiche Eigenschaften in gleicher Schlüsselreihenfolge, und stimmen sie mit den Dateien im Referenz-Repo überein?
 5. Lassen sich statische Dateien einer App mit den Rechten eines Entwicklers lesen, hochladen und löschen (`/appcontent/…`, QRS `appcontent`)?
 6. Übersteht eine Story mit Snapshots den Weg `GetFullPropertyTree` → `SetFullPropertyTree` in eine neue App ohne Daten?

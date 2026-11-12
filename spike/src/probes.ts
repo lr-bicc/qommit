@@ -401,7 +401,7 @@ const SPIKE_IDS = {
   sheet: "spike-sheet",
   story: "spike-story",
   variable: "spike-variable",
-  link: "spike-git-link",
+  link: "spike-qommit-link",
   variableList: "spike-variable-list",
   p4VariableList: "spike-p4-variable-list",
 };
@@ -1302,7 +1302,7 @@ const P5: ProbeDef = {
 
 const P3: ProbeDef = {
   id: "P3",
-  question: "Does a persistent link object (qId spike-git-link, qType git-link) survive and is it listed by GetAllInfos?",
+  question: "Does a persistent link object (qId spike-qommit-link, qType qommit-link) survive and is it listed by GetAllInfos?",
   timeoutMs: 60_000,
   needsEngine: true,
   async run(ctx, ev) {
@@ -1312,24 +1312,24 @@ const P3: ProbeDef = {
 
     let existing: EngineApi | null = null;
     try {
-      existing = await step(doc.getObject(SPIKE_IDS.link), "GetObject spike-git-link");
+      existing = await step(doc.getObject(SPIKE_IDS.link), "GetObject spike-qommit-link");
     } catch (e) {
       if (!isNotFound(e)) ev.lookupError = describeError(e);
     }
     ev.existedBefore = existing !== null || ev.inAllInfosBefore === true;
     if (existing) {
       try {
-        ev.existingProperties = await step(existing.getProperties(), "GetProperties spike-git-link");
+        ev.existingProperties = await step(existing.getProperties(), "GetProperties spike-qommit-link");
       } catch (e) {
         ev.existingPropertiesError = describeError(e);
       }
     } else {
       // Not deleted and no DoSave here: P7 runs last and saves.
       const created: EngineApi = await step(
-        doc.createObject({ qInfo: { qId: SPIKE_IDS.link, qType: "git-link" }, link: { probe: true } }),
-        "CreateObject spike-git-link",
+        doc.createObject({ qInfo: { qId: SPIKE_IDS.link, qType: "qommit-link" }, link: { probe: true } }),
+        "CreateObject spike-qommit-link",
       );
-      const info = (await step(created.getInfo(), "GetInfo spike-git-link")) as NxInfo;
+      const info = (await step(created.getInfo(), "GetInfo spike-qommit-link")) as NxInfo;
       ev.createdId = info?.qId ?? null;
     }
     const after = await getAllInfos(doc);

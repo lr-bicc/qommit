@@ -14,7 +14,7 @@ Ein Klick führt die Probes P11, P1, P4, P6, P9 (nur mit Haken), P10, P8, P2, P5
 - P2 legt `spike-dimension`, `spike-measure`, `spike-masterobject`, `spike-sheet`, `spike-story` und die Variable `spike-variable` (Name `spike_variable`) an und löscht sie wieder.
 - P9 legt im eigenen Arbeitsbereich („Meine Arbeit“) eine neue App `spike-probe-<Zeitstempel>` an, legt darin dieselben `spike-…`-Objekte an, kopiert die erste Story der geöffneten App hinein und löscht die neue App am Ende wieder. Die geöffnete App ändert P9 nicht.
 - P5 lädt `spike-probe.txt` in die App-Inhaltsbibliothek hoch und löscht sie wieder.
-- P3 legt das Objekt `spike-git-link` an und lässt es **absichtlich** in der App (die Berichte A2 und B prüfen, ob es erhalten bleibt und mitkopiert wird).
+- P3 legt das Objekt `spike-qommit-link` an und lässt es **absichtlich** in der App (die Berichte A2 und B prüfen, ob es erhalten bleibt und mitkopiert wird).
 - P7 speichert die App (`DoSave`) – nur wenn die Checkbox angehakt ist.
 
 P1, P4, P6, P8, P10 und P11 lesen nur.
@@ -42,7 +42,7 @@ Die Kopie wird hier dupliziert statt neu geladen: Beim Neuladen derselben App ka
 
 1. **Direkt nach Bericht A** Kopie 1 im Hub duplizieren. Das ist **Kopie 2**.
 2. Kopie 2 öffnen, **Checkbox „Include DoSave probe (P7)“ NICHT anhaken** und die Probes ausführen. Datei als **Bericht A2** ablegen (`"includeDoSave": false`).
-   - `existedBefore: true` in P3 heißt: Das Link-Objekt `spike-git-link` aus Lauf A blieb **ohne `DoSave`** erhalten und wurde mitkopiert.
+   - `existedBefore: true` in P3 heißt: Das Link-Objekt `spike-qommit-link` aus Lauf A blieb **ohne `DoSave`** erhalten und wurde mitkopiert.
 
 ## 4. Bericht B1 und Bericht B: Wird das Link-Objekt nach dem Speichern mitkopiert?
 
@@ -63,7 +63,7 @@ Die Kopie wird hier dupliziert statt neu geladen: Beim Neuladen derselben App ka
 
 ## 6. Sichtbarkeit des Link-Objekts prüfen
 
-In einer der Kopien (oder der veröffentlichten App) in der Oberfläche nachsehen, ob `spike-git-link` irgendwo auftaucht: Sheet-Liste, Master Items (Dimensionen, Kennzahlen, Visualisierungen), Bookmarks, Stories. Ergebnis kurz notieren (z. B. „nirgends sichtbar“ oder „erscheint unter …“, gern mit Screenshot).
+In einer der Kopien (oder der veröffentlichten App) in der Oberfläche nachsehen, ob `spike-qommit-link` irgendwo auftaucht: Sheet-Liste, Master Items (Dimensionen, Kennzahlen, Visualisierungen), Bookmarks, Stories. Ergebnis kurz notieren (z. B. „nirgends sichtbar“ oder „erscheint unter …“, gern mit Screenshot).
 
 ## 7. Aufräumen und übergeben
 
