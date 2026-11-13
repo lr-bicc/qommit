@@ -1,4 +1,4 @@
-import { commitFiles, getTree, getBranchSha, createBranch, compare, createTag, isValidRefName, listBranches, listTags, listCommits } from "../../src/github/repo";
+import { commitFiles, getTree, getBranchSha, createBranch, compare, createTag, isValidRefName, listBranches, listTags, listCommits, getRepo, readTextFile, whoAmI } from "../../src/github/repo";
 import { createGitHubClient } from "../../src/github/client";
 import { mockFetch } from "./mock-fetch";
 const R = "/repos/lr-bicc/demo";
@@ -142,4 +142,26 @@ test("tree entries map each path to the sha of its own blob, even when blobs fin
   ]);
   expect(received).toBe(expectedBlobs);
   expect(peak).toBeLessThanOrEqual(5);
+});
+
+test("getRepo returns name and default branch, null when missing", async () => {
+  const m = mockFetch({ [`GET ${R}`]: () => ({ body: { full_name: "lr-bicc/app", default_branch: "main" } }) });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(await getRepo(c, "lr-bicc/demo")).toEqual({ repo: "lr-bicc/app", defaultBranch: "main" });
+  expect(await getRepo(c, "lr-bicc/other")).toBeNull();
+});
+test("readTextFile decodes base64 as UTF-8, encodes the path per segment, null on 404, rethrows other errors", async () => {
+  const m = mockFetch({
+    [`GET ${R}/contents/docs/My%20File.md?ref=main`]: () => ({ body: { content: "w6Rw\nZmVs\n", encoding: "base64" } }),
+    [`GET ${R}/contents/secret.md?ref=main`]: () => ({ status: 403, body: { message: "Forbidden" } }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(await readTextFile(c, "lr-bicc/demo", "main", "docs/My File.md")).toBe("äpfel");
+  expect(await readTextFile(c, "lr-bicc/demo", "main", "missing.md")).toBeNull();
+  await expect(readTextFile(c, "lr-bicc/demo", "main", "secret.md")).rejects.toBeInstanceOf(Error);
+});
+test("whoAmI returns the login", async () => {
+  const m = mockFetch({ ["GET /user"]: () => ({ body: { login: "octocat", id: 1 } }) });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(await whoAmI(c)).toEqual({ login: "octocat" });
 });

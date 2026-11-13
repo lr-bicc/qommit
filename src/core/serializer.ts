@@ -1,13 +1,11 @@
 import type { AppSnapshot, FileMap } from "./types";
 import { scriptToFiles } from "./script-tabs";
+import { replaceAppContentIds } from "./app-content-ids";
 
 export function toJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function normalizeAppId(text: string, appId: string, canonicalAppId: string): string {
-  return text.split(`/appcontent/${appId}/`).join(`/appcontent/${canonicalAppId}/`);
-}
 
 // An empty id or one with "/" yields a path the reader skips, so the object would be lost on the next update.
 function checkId(label: string, id: string): string {
@@ -20,7 +18,7 @@ function checkId(label: string, id: string): string {
 /** Turns a snapshot into the repository layout (repository path -> content). Throws on ids that cannot be stored. */
 export function serializeApp(snap: AppSnapshot, opts: { canonicalAppId: string }): FileMap {
   const files: FileMap = new Map();
-  const json = (value: unknown) => normalizeAppId(toJson(value), snap.appId, opts.canonicalAppId);
+  const json = (value: unknown) => replaceAppContentIds(toJson(value), opts.canonicalAppId);
 
   for (const [path, content] of scriptToFiles(snap.script)) files.set(path, content);
   files.set("objects/appprops.json", json(snap.appProps));

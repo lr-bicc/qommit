@@ -1,6 +1,7 @@
 import type { FileContent } from "../core/types";
 import { GitHubError } from "./errors";
 import type { GitHubClient } from "./client";
+import type { RepoRef } from "./snapshot";
 
 export interface CommitInfo { sha: string; message: string; author: string; date: string }
 export interface TagInfo { name: string; sha: string }
@@ -122,4 +123,31 @@ export function isValidRefName(name: string): boolean {
   if (/[/.]$/.test(name) || name.endsWith(".lock")) return false;
   if (name.split("/").some((s) => s.startsWith("."))) return false;
   return true;
+}
+
+export async function getRepo(c: GitHubClient, repo: string): Promise<RepoRef | null> {
+  try {
+    const res = await c.rest<{ full_name: string; default_branch: string }>("GET", `/repos/${repo}`);
+    return { repo: res.full_name, defaultBranch: res.default_branch };
+  } catch (e) {
+    if (e instanceof GitHubError && e.kind === "not-found") return null;
+    throw e;
+  }
+}
+
+/** Reads a text file at `ref`; null when it does not exist. Decodes Base64 without Buffer. */
+export async function readTextFile(c: GitHubClient, repo: string, ref: string, path: string): Promise<string | null> {
+  try {
+    const res = await c.rest<{ content: string }>("GET", `/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`);
+    const binary = atob(res.content.replace(/\s/g, ""));
+    return new TextDecoder("utf-8").decode(Uint8Array.from(binary, (ch) => ch.charCodeAt(0)));
+  } catch (e) {
+    if (e instanceof GitHubError && e.kind === "not-found") return null;
+    throw e;
+  }
+}
+
+export async function whoAmI(c: GitHubClient): Promise<{ login: string }> {
+  const res = await c.rest<{ login: string }>("GET", "/user");
+  return { login: res.login };
 }

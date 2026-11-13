@@ -128,7 +128,9 @@ export function upsertBranchRow(readme: string, row: { branch: string; appUrl: s
 }
 
 export function canonicalAppId(rows: BranchRow[], defaultBranch: string): string | null {
-  return rows.find(r => r.branch === defaultBranch)?.appId ?? null;
+  return rows.find(r => r.branch === defaultBranch)?.appId
+    ?? rows.find(r => r.appId !== null)?.appId
+    ?? null;
 }
 
 export function findBranchForApp(rows: BranchRow[], appId: string): string | null {
