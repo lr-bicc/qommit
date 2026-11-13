@@ -26,9 +26,10 @@ function isWireContent(v: unknown): v is WireContent {
 /** Validates and converts the wire form of commitFiles' input; null when malformed. */
 function parseCommitInput(v: unknown): { branch: string; parentSha: string; message: string; changes: FileChange[] } | null {
   if (!isObject(v) || !isString(v.branch) || !isString(v.parentSha) || !isString(v.message) || !Array.isArray(v.changes)) return null;
+  if (!isValidArg("ref", v.branch) || !isValidArg("sha", v.parentSha)) return null;
   const changes: FileChange[] = [];
   for (const c of v.changes) {
-    if (!isObject(c) || !isString(c.path)) return null;
+    if (!isObject(c) || !isString(c.path) || !isValidArg("path", c.path)) return null;
     if (c.content === null) changes.push({ path: c.path, content: null });
     else if (isWireContent(c.content)) {
       try {
@@ -77,11 +78,39 @@ const OPS: Record<keyof GitHubPort, OpSpec> = {
   compare: { strings: 3, repo: true, run: (c, _o, [r, base, head]) => repoApi.compare(c, r as string, base as string, head as string) },
 };
 
+type ArgKind = "sha" | "ref" | "path" | "name";
+
+// Argument kinds by position; unlisted string arguments are not interpolated into URL paths.
+const ARG_KINDS: Partial<Record<keyof GitHubPort, Record<number, ArgKind>>> = {
+  createRepo: { 0: "name" },
+  getBranchSha: { 1: "ref" },
+  getTree: { 1: "sha" },
+  readTextFile: { 1: "ref", 2: "path" },
+  createBranch: { 1: "ref", 2: "sha" },
+  listCommits: { 1: "ref" },
+  compare: { 1: "ref", 2: "ref" },
+};
+
+/** Rejects values that could climb out of the repository path or alter the URL. */
+function isSafeSegments(value: string): boolean {
+  if (value === "" || value.startsWith("/")) return false;
+  if (/[?#\\%\u0000-\u001f\u007f]/.test(value)) return false;
+  return value.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+function isValidArg(kind: ArgKind, value: string): boolean {
+  if (kind === "sha") return /^[0-9a-f]{4,40}$/i.test(value);
+  if (kind === "name") return isValidName(value);
+  return isSafeSegments(value);
+}
+
+const isValidName = (name: string): boolean => /^[A-Za-z0-9._-]+$/.test(name) && !/^\.+$/.test(name);
+
 const notAllowed = (message: string): GatewayResponse => ({ ok: false, error: { kind: "not-allowed", message } });
 
 function isRepoOf(repo: string, org: string): boolean {
   const m = /^([^/]+)\/([A-Za-z0-9._-]+)$/.exec(repo);
-  return m !== null && m[1].toLowerCase() === org.toLowerCase();
+  return m !== null && m[1].toLowerCase() === org.toLowerCase() && isValidName(m[2]);
 }
 
 function toWireError(e: unknown): WireError {
@@ -108,6 +137,10 @@ export async function handleGateway(request: GatewayRequest, deps: GatewayDeps):
     const args = Array.isArray(request.args) ? [...request.args] : [];
     if (args.length !== spec.strings + (spec.tail ? 1 : 0)) return notAllowed("Wrong number of arguments");
     for (let i = 0; i < spec.strings; i++) if (!isString(args[i])) return notAllowed("Wrong argument type");
+    const kinds = ARG_KINDS[op] ?? {};
+    for (const [i, kind] of Object.entries(kinds)) {
+      if (!isValidArg(kind, args[Number(i)] as string)) return notAllowed("Invalid argument value");
+    }
     if (spec.tail === "number") {
       const page = args[spec.strings];
       if (typeof page !== "number" || !Number.isInteger(page) || page < 1) return notAllowed("Wrong argument type");
