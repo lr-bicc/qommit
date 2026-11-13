@@ -1,3 +1,4 @@
 import { render } from "preact";
+import { OptionsPage } from "./Options";
 
-render(<p>Qommit</p>, document.getElementById("root")!);
+render(<OptionsPage />, document.getElementById("root")!);
