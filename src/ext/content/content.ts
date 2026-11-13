@@ -1,0 +1,1 @@
+// Qommit content script (placeholder).

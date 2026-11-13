@@ -1,0 +1,1 @@
+// Qommit service worker (placeholder).

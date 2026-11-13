@@ -5,7 +5,10 @@
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["vitest/globals", "node"],
+    "types": ["vitest/globals", "node", "chrome"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "resolveJsonModule": true,
     "noEmit": true,
     "skipLibCheck": true
   },

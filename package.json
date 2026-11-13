@@ -5,16 +5,21 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:ext": "node scripts/build-ext.mjs"
   },
   "dependencies": {
     "diff": "^9.0.0",
-    "fflate": "^0.8.3"
+    "enigma.js": "^2.15.0",
+    "fflate": "^0.8.3",
+    "preact": "^11.2.0"
   },
   "devDependencies": {
+    "@testing-library/preact": "^3.2.6",
+    "@types/chrome": "^0.3.7",
     "@types/node": "^22.20.5",
-    "enigma.js": "^2.15.0",
     "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.4",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   }
