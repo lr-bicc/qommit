@@ -17,10 +17,12 @@ export function createContentFiles(doc: EngineApi, loc: { origin: string; prefix
     async list() {
       try {
         const libs = (await doc.getContentLibraries()) as { qItems?: { qName: string; qAppSpecific?: boolean }[] } | undefined;
-        const lib = libs?.qItems?.find((l) => l.qAppSpecific);
+        if (!Array.isArray(libs?.qItems)) throw new Error("GetContentLibraries answered without qItems");
+        const lib = libs.qItems.find((l) => l.qAppSpecific);
         if (!lib) return [];
         const content = (await doc.getLibraryContent(lib.qName)) as { qItems?: { qUrl: string }[] } | undefined;
-        return (content?.qItems ?? []).map(({ qUrl }) => {
+        if (!Array.isArray(content?.qItems)) throw new Error(`GetLibraryContent answered without qItems for ${lib.qName}`);
+        return content.qItems.map(({ qUrl }) => {
           const m = URL_NAME.exec(qUrl);
           if (!m) throw new Error(`unexpected content url ${qUrl}`); // never drop a file silently: it would look deleted
           return decodeURIComponent(m[1]!);

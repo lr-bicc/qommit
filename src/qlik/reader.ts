@@ -51,11 +51,14 @@ async function runPool(tasks: (() => Promise<void>)[], limit = MAX_IN_FLIGHT): P
 }
 
 /** Creates a session object, reads its layout, and destroys it again, also when reading fails. */
-async function readSessionList<T>(doc: EngineApi, what: string, id: string, def: Record<string, unknown>): Promise<T> {
+async function readSessionList<T>(doc: EngineApi, what: string, id: string, def: Record<string, unknown>, key: string): Promise<T> {
   return step(what, async () => {
     const list = (await doc.createSessionObject({ qInfo: { qId: id, qType: id }, ...def })) as EngineApi;
     try {
-      return (await list.getLayout()) as T;
+      const layout = (await list.getLayout()) as Record<string, unknown> | undefined;
+      // An answer without the list itself is a failure, not an empty list: it would hide flags, approvals or objects.
+      if (!layout || typeof layout[key] !== "object" || layout[key] === null) throw new Error(`the answer has no ${key}`);
+      return layout as T;
     } finally {
       try {
         await doc.destroySessionObject(id);
@@ -92,7 +95,7 @@ export async function readApp(
     async () => {
       const layout = await readSessionList<{ qVariableList?: { qItems?: VariableListItem[] } }>(doc, "variable list", "qommit-variable-list", {
         qVariableListDef: { qType: "variable", qShowReserved: true, qShowConfig: true, qData: {} },
-      });
+      }, "qVariableList");
       variableList = layout.qVariableList?.qItems ?? [];
     },
     async () => {
@@ -110,14 +113,14 @@ export async function readApp(
       phase1.push(async () => {
         const layout = await readSessionList<{ qAppObjectList?: { qItems?: ListItem[] } }>(doc, `${type} list`, `qommit-${type}-list`, {
           qAppObjectListDef: { qType: type, qData: {} },
-        });
+        }, "qAppObjectList");
         approved[type] = approvedIds(layout.qAppObjectList?.qItems);
       });
     }
     phase1.push(async () => {
       const layout = await readSessionList<{ qBookmarkList?: { qItems?: ListItem[] } }>(doc, "bookmark list", "qommit-bookmark-list", {
         qBookmarkListDef: { qType: "bookmark", qData: {} },
-      });
+      }, "qBookmarkList");
       approved.bookmark = approvedIds(layout.qBookmarkList?.qItems);
     });
   }

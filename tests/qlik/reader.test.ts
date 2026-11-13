@@ -180,3 +180,58 @@ describe("onProgress", () => {
     expect(calls.map((c) => c[0])).toEqual([...calls.map((c) => c[0])].sort((a, b) => a - b));
   });
 });
+
+describe("list answers", () => {
+  const withLayout = (layout: unknown) => {
+    const { doc } = fakeDoc(appFromSnapshot(makeSnapshot(), { published: true }));
+    return {
+      ...doc,
+      createSessionObject: async (props: { qInfo: { qId: string } }) => {
+        const inner = (await doc.createSessionObject!(props)) as { getLayout(): Promise<unknown> };
+        return { getLayout: () => inner.getLayout().then((real) => (layout === "real" ? real : layout)) };
+      },
+    };
+  };
+  test.each([["variable list"], ["sheet list"], ["bookmark list"]])("a layout without the list fails the read (%s)", async (name) => {
+    const doc = withLayout({});
+    const broken = { ...doc, createSessionObject: (p: { qInfo: { qId: string } }) =>
+      p.qInfo.qId === `qommit-${name.replace(" ", "-")}` ? doc.createSessionObject(p) : fakeDoc(appFromSnapshot(makeSnapshot(), { published: true })).doc.createSessionObject!(p) };
+    const err = await readApp(broken, APP_ID, { published: true }).catch((e) => e);
+    expect(err).toBeInstanceOf(QlikReadError);
+    expect(err.message).toMatch(new RegExp(`Could not read ${name}: the answer has no q(Variable|AppObject|Bookmark)List`));
+  });
+  test("an existing list without qItems is an empty list", async () => {
+    const snap = await readApp(withLayout({ qVariableList: {}, qAppObjectList: {}, qBookmarkList: {} }) as never, APP_ID, { published: true });
+    expect(snap.sheets).toEqual([]);
+    expect(snap.bookmarks).toEqual([]);
+  });
+});
+
+describe("the variable list definition", () => {
+  test("readApp asks for reserved and config variables of type variable", async () => {
+    const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
+    await readApp(fake.doc, APP_ID, { published: false });
+    expect(fake.sessionDefs.map((d) => d.qVariableListDef)).toContainEqual({ qType: "variable", qShowReserved: true, qShowConfig: true, qData: {} });
+  });
+  test("the fake omits reserved variables unless qShowReserved is set, and lists only qType variable", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    app.variables = [
+      { props: { qInfo: { qId: "a", qType: "variable" }, qName: "a" } },
+      { props: { qInfo: { qId: "r", qType: "variable" }, qName: "r" }, list: { qIsReserved: true } },
+    ];
+    const { doc } = fakeDoc(app);
+    const items = async (def: object) => {
+      const list = await doc.createSessionObject({ qInfo: { qId: "qommit-x", qType: "x" }, qVariableListDef: def });
+      return (await list.getLayout()).qVariableList.qItems.map((i: { qInfo: { qId: string } }) => i.qInfo.qId);
+    };
+    expect(await items({ qType: "variable", qShowReserved: true, qData: {} })).toEqual(["a", "r"]);
+    expect(await items({ qType: "variable", qData: {} })).toEqual(["a"]);
+    expect(await items({ qShowReserved: true, qData: {} })).toEqual([]);
+  });
+  test("without qShowReserved a reserved variable would be missing (the reader relies on the flag)", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    app.variables = [{ props: { qInfo: { qId: "r", qType: "variable" }, qName: "r" }, list: { qIsReserved: true } }];
+    const snap = await read(app);
+    expect(snap.variables[0]).toMatchObject({ qIsReserved: true });
+  });
+});

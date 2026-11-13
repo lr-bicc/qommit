@@ -20,8 +20,13 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
  * engine serialises). `calls` holds `"<method> <id>"` entries, with `-` as id for document-level calls
  * without one. An unknown object rejects. `failOn(method, id)` makes that one call reject.
  */
-export function fakeDoc(app: FakeApp): { doc: FakeDoc; calls: string[]; maxInFlight(): number; failOn(method: string, id: string): void } {
+export function fakeDoc(app: FakeApp): {
+  doc: FakeDoc; calls: string[]; maxInFlight(): number; failOn(method: string, id: string): void;
+  /** The definitions passed to createSessionObject, in call order. */
+  sessionDefs: Record<string, unknown>[];
+} {
   const calls: string[] = [];
+  const sessionDefs: Record<string, unknown>[] = [];
   const failing = new Set<string>();
   const sessions = new Set<string>();
   let inFlight = 0;
@@ -91,7 +96,12 @@ export function fakeDoc(app: FakeApp): { doc: FakeDoc; calls: string[]; maxInFli
 
   function layoutOf(def: Record<string, unknown>): unknown {
     if (def.qVariableListDef) {
-      return { qVariableList: { qItems: app.variables.map((v) => ({ qName: v.props.qName, qInfo: clone(v.props.qInfo), ...v.list })) } };
+      // Like the engine: only qType "variable" lists variables, reserved ones only with qShowReserved.
+      const d = def.qVariableListDef as { qType?: string; qShowReserved?: boolean };
+      const items = d.qType !== "variable" ? [] : app.variables
+        .filter((v) => d.qShowReserved === true || v.list?.qIsReserved !== true)
+        .map((v) => ({ qName: v.props.qName, qInfo: clone(v.props.qInfo), ...v.list }));
+      return { qVariableList: { qItems: items } };
     }
     if (def.qAppObjectListDef) {
       const type = (def.qAppObjectListDef as { qType: string }).qType;
@@ -124,6 +134,7 @@ export function fakeDoc(app: FakeApp): { doc: FakeDoc; calls: string[]; maxInFli
       return call("createSessionObject", id, () => {
         sessions.add(id);
         const def = clone(props);
+        sessionDefs.push(def);
         return {
           getLayout: () => call("getLayout", id, () => {
             if (!sessions.has(id)) throw unknown("session object", id);
@@ -155,7 +166,7 @@ export function fakeDoc(app: FakeApp): { doc: FakeDoc; calls: string[]; maxInFli
     }),
   };
 
-  return { doc, calls, maxInFlight: () => peak, failOn: (method, id) => { failing.add(`${method} ${id}`); } };
+  return { doc, calls, sessionDefs, maxInFlight: () => peak, failOn: (method, id) => { failing.add(`${method} ${id}`); } };
 }
 
 const encodePath = (name: string) => name.split("/").map(encodeURIComponent).join("/");

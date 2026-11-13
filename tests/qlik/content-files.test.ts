@@ -34,6 +34,20 @@ describe("ContentFiles.list", () => {
   });
 });
 
+describe("ContentFiles.list answers", () => {
+  const f = vi.fn() as unknown as typeof fetch;
+  test("GetContentLibraries without qItems fails", async () => {
+    const doc = { ...fakeDoc(base()).doc, getContentLibraries: async () => ({}) };
+    await expect(createContentFiles(doc, loc, APP_ID, f).list()).rejects.toThrow(/Could not list static files.*qItems/);
+  });
+  test("GetLibraryContent without qItems fails instead of listing no files", async () => {
+    const doc = { ...fakeDoc({ ...base(), libraryFiles: [`/appcontent/${APP_ID}/a.png`] }).doc, getLibraryContent: async () => ({}) };
+    const err = await createContentFiles(doc, loc, APP_ID, f).list().catch((e) => e);
+    expect(err).toBeInstanceOf(QlikReadError);
+    expect(err.message).toMatch(/qItems/);
+  });
+});
+
 describe("ContentFiles.download", () => {
   test("GETs the encoded url with credentials and returns the bytes", async () => {
     const f = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
