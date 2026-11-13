@@ -50,7 +50,8 @@ export function installFakeChrome(): FakeChrome {
     panelBehaviors: [],
     optionsPageOpened: 0,
     emitMessage(message, sender = { id: "qommit-test" }) {
-      for (const fn of [...onMessage.listeners]) fn(message, sender, () => {});
+      const delivered = clone(message);
+      for (const fn of [...onMessage.listeners]) fn(delivered, sender, () => {});
     },
     emitInstalled(details = { reason: "install" }) {
       for (const fn of [...onInstalled.listeners]) fn(details);
@@ -60,7 +61,8 @@ export function installFakeChrome(): FakeChrome {
     },
   };
 
-  const clone = <T>(value: T): T => (value === undefined ? value : structuredClone(value));
+  // Chrome serialises messages and storage values as JSON: Map, Uint8Array etc. do not survive.
+  const clone = <T>(value: T): T => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
 
   // `respond` throwing rejects the call; returning undefined means nobody answered.
   const answer = async (message: unknown) => clone(fake.respond(message));
@@ -106,8 +108,9 @@ export function installFakeChrome(): FakeChrome {
     runtime: {
       id: "qommit-test",
       async sendMessage(message: unknown) {
-        fake.sent.push(clone(message));
-        return answer(message);
+        const sent = clone(message);
+        fake.sent.push(sent);
+        return answer(sent);
       },
       async openOptionsPage() {
         fake.optionsPageOpened++;
@@ -117,8 +120,9 @@ export function installFakeChrome(): FakeChrome {
     },
     tabs: {
       async sendMessage(tabId: number, message: unknown) {
-        fake.tabMessages.push({ tabId, message: clone(message) });
-        return answer(message);
+        const sent = clone(message);
+        fake.tabMessages.push({ tabId, message: sent });
+        return answer(sent);
       },
       async query() {
         return clone(fake.tabs);
