@@ -69,3 +69,33 @@ test("reads title and published state", async () => {
   const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
   expect(await readAppInfo(fake.doc)).toEqual({ title: "Test app", published: false });
 });
+
+describe("missing object detection", () => {
+  const notFoundErrors: [string, () => unknown][] = [
+    ["enigma Error with code -2", () => Object.assign(new Error("Object not found"), { code: -2 })],
+    ["plain code 2 object", () => ({ code: 2, message: "Object not found" })],
+  ];
+  const withGetObject = (reject: unknown, app = appFromSnapshot(makeSnapshot())) => {
+    const fake = fakeDoc(app);
+    const orig = fake.doc.getObject!;
+    fake.doc.getObject = async (id: string) => {
+      await orig(id).catch(() => undefined);
+      throw reject;
+    };
+    return { fake, app };
+  };
+  test.each(notFoundErrors)("%s counts as missing", async (_n, make) => {
+    expect(await readLink(withGetObject(make()).fake.doc)).toBeNull();
+    expect(await readGitoqlokMeta(withGetObject(make()).fake.doc)).toBeNull();
+    const { fake, app } = withGetObject(make());
+    await writeLink(fake.doc, LINK);
+    expect(app.objects.some((o) => o.props.qInfo.qId === LINK_ID)).toBe(true);
+    await expect(removeLink(withGetObject(make()).fake.doc)).resolves.toBeUndefined();
+  });
+  test("access denied still propagates", async () => {
+    const denied = { code: 5, message: "Access denied" };
+    await expect(readLink(withGetObject(denied).fake.doc)).rejects.toBe(denied);
+    await expect(readGitoqlokMeta(withGetObject(denied).fake.doc)).rejects.toBe(denied);
+    await expect(writeLink(withGetObject(denied).fake.doc, LINK)).rejects.toBe(denied);
+  });
+});

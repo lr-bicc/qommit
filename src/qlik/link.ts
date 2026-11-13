@@ -4,8 +4,15 @@ export interface LinkData { repo: string; branch: string; appId: string; syncedS
 export const LINK_ID = "qommit-link"; // qId and qType
 export const GITOQLOK_META_ID = "_gitoqlikMetaData";
 
-/** The engine rejects with code 2 when an object does not exist. */
-const isNotFound = (e: unknown): boolean => typeof e === "object" && e !== null && (e as { code?: unknown }).code === 2;
+/**
+ * "The object does not exist": engine code 2, enigma.js' own OBJECT_NOT_FOUND (-2, raised for a null handle)
+ * or a "not found" message. Anything else (access denied, closed session) is a real failure.
+ */
+const isNotFound = (e: unknown): boolean => {
+  if (typeof e !== "object" || e === null) return false;
+  const { code, message } = e as { code?: unknown; message?: unknown };
+  return code === 2 || code === -2 || (typeof message === "string" && /not found/i.test(message));
+};
 
 async function openOrNull(doc: EngineApi, id: string): Promise<EngineApi | null> {
   try {
