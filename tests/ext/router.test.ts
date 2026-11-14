@@ -26,7 +26,7 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
     const sha = github.seed(REPO, files);
     app.objects.push({ props: { qInfo: { qId: "qommit-link", qType: "qommit-link" }, link: { repo: REPO, branch: init.linkBranch ?? "main", appId: APP_ID, syncedSha: sha } } });
   }
-  const sessions = { opened: 0, closed: 0, reads: 0, maxReads: 0, failNext: false, drop: () => {}, openError: null as Error | null };
+  const sessions = { opened: 0, closed: 0, reads: 0, maxReads: 0, failNext: false, hangClose: false, failLinkWrite: false, drop: () => {}, openError: null as Error | null };
   const events: ProgressEvent[] = [];
   let clock = 0;
   const router = createRouter({
@@ -35,6 +35,7 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
       sessions.opened++;
       if (sessions.openError) throw sessions.openError;
       const fake = fakeDoc(app);
+      if (sessions.failLinkWrite) fake.failOn("createObject", "qommit-link");
       if (sessions.failNext) { sessions.failNext = false; fake.failOn("getScript", "-"); }
       const doc = {
         ...fake.doc,
@@ -48,7 +49,7 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
       sessions.drop = () => { closed = true; };
       const session: EngineSession = {
         doc, appId: loc.appId, user: "r.vasilev", isClosed: () => closed,
-        close: async () => { closed = true; sessions.closed++; },
+        close: () => { closed = true; sessions.closed++; return sessions.hangClose ? new Promise<void>(() => {}) : Promise.resolve(); },
       };
       return session;
     },
@@ -292,4 +293,46 @@ test("the router never puts the options or raw error objects into a result", asy
   const { run, github } = setup({ linked: true });
   github.getRepo = async () => { throw Object.assign(new Error("boom"), { deps: { token: "ghp_x" } }); };
   expect(JSON.stringify(await run({ cmd: "status" }))).not.toContain("ghp_x");
+});
+
+test("a session that never finishes closing does not block the queue", async () => {
+  const { run, sessions, failNextRead, setUrl } = setup({ linked: true });
+  sessions.hangClose = true;
+  failNextRead();
+  expect(await run({ cmd: "localChanges" })).toMatchObject({ ok: false, error: { code: "qlik-read" } });
+  expect(await run({ cmd: "localChanges" })).toMatchObject({ ok: true });
+  expect(sessions.opened).toBe(2);
+  setUrl(appPage(OTHER_ID));
+  const view = (await run({ cmd: "status" })) as any;
+  expect(view.value.app.id).toBe(OTHER_ID);
+  expect(sessions.opened).toBe(3);
+});
+
+test("a failed mutating command forgets the remembered status", async () => {
+  const { run, sessions, cache } = setup();
+  expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("unlinked");
+  sessions.failLinkWrite = true;
+  const set = cache.set;
+  cache.set = async () => { throw new Error("storage full"); };
+  sessions.drop(); // the next session cannot write the link object
+  const failed = await run({ cmd: "createRepository" });
+  expect(failed).toMatchObject({ ok: false, error: { code: "internal" } });
+  cache.set = set; // storage works again; the app object still cannot be written
+  // the repository exists now: the next command must see it, not the old "unlinked"
+  expect(await run({ cmd: "localChanges" })).toMatchObject({ ok: true });
+});
+
+test("commit uses a fresh status, so a link changed elsewhere is honoured", async () => {
+  const { run, app, github } = setup({ linked: true });
+  const main = github.head(REPO, "main");
+  await github.createBranch(REPO, "dev", main);
+  await run({ cmd: "status" }); // remembers branch main
+  app.dimensions.push({ qInfo: { qId: "d-new", qType: "dimension" }, qMetaDef: { title: "Region" } });
+  const changes = (await run({ cmd: "localChanges" })) as any;
+  const paths = changes.value.items.map((i: any) => i.path);
+  (app.objects.find((o) => o.props.qInfo.qId === "qommit-link")!.props as any).link.branch = "dev";
+  const res = (await run({ ...COMMIT, paths })) as any;
+  expect(res.ok).toBe(true);
+  expect(github.head(REPO, "dev")).toBe(res.value.sha);
+  expect(github.head(REPO, "main")).toBe(main);
 });

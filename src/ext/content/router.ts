@@ -65,20 +65,17 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
     }
   };
 
-  async function dropSession(): Promise<void> {
+  /** Forgets the session at once; closing may never settle on a dead socket, so it runs in the background. */
+  function dropSession(): void {
     const old = session;
     session = null;
     if (!old) return;
-    try {
-      await old.close();
-    } catch {
-      // closing an old session is best effort
-    }
+    void Promise.resolve().then(() => old.close()).catch(() => {});
   }
 
   async function sessionFor(loc: QlikLocation & { appId: string }): Promise<EngineSession> {
     if (session && session.appId === loc.appId && !session.isClosed()) return session;
-    await dropSession();
+    dropSession();
     session = await deps.openSession(loc);
     return session;
   }
@@ -125,6 +122,9 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
       return status;
     };
 
+    // Mutating commands are multi-step: whatever fails, the app or GitHub may have changed already.
+    let forget = false;
+    try {
     switch (command.cmd) {
       case "status": {
         const status = await freshStatus();
@@ -138,14 +138,12 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
         throw notLinked(command.cmd);
       }
       case "createRepository": {
-        const link = await createRepository(ports, { name: command.name });
-        statuses.delete(appId);
-        return link;
+        forget = true;
+        return createRepository(ports, { name: command.name });
       }
       case "connect": {
-        const link = await connectRepository(ports, { repo: command.repo, mode: command.mode, branch: command.branch });
-        statuses.delete(appId);
-        return link;
+        forget = true;
+        return connectRepository(ports, { repo: command.repo, mode: command.mode, branch: command.branch });
       }
       case "createBranch": {
         const status = await currentStatus();
@@ -153,22 +151,25 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
         if (status.state === "duplicated") source = status.source;
         else if (status.state === "branch-missing") source = { repo: status.link.repo, branch: null, syncedSha: status.link.syncedSha || null };
         else throw notLinked(command.cmd);
-        const link = await createBranchForCopy(ports, { source, name: command.name, fromSource: command.fromSource });
-        statuses.delete(appId);
-        return link;
+        forget = true;
+        return createBranchForCopy(ports, { source, name: command.name, fromSource: command.fromSource });
       }
       case "unlink": {
+        forget = true;
         await unlinkApp(ports);
-        statuses.delete(appId);
         return null;
       }
       case "commit": {
-        const { link } = await linkedStatus();
+        // Fresh status: the link may have changed elsewhere (same app open in another tab).
+        const status = await freshStatus();
+        if (status.state !== "linked") throw notLinked(command.cmd);
+        const { link } = status;
+        forget = true;
         const result = await commitChanges(ports, {
           link, message: command.message, paths: command.paths,
           removeUnmaintained: command.removeUnmaintained, allowBehind: command.allowBehind,
         });
-        if ("sha" in result) statuses.delete(appId);
+        if ("behind" in result) forget = false; // nothing was written
         return result;
       }
       case "history": {
@@ -181,6 +182,9 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
       default:
         throw new Error(`Unknown command: ${String((command as { cmd?: unknown }).cmd)}`);
     }
+    } finally {
+      if (forget) statuses.delete(appId);
+    }
   }
 
   async function runOne(command: Command): Promise<CommandResult> {
@@ -188,7 +192,7 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
       return { ok: true, value: await execute(command) };
     } catch (e) {
       const error = toCommandError(e);
-      if (error.code === "qlik-read" || error.code === "qlik-session") await dropSession();
+      if (error.code === "qlik-read" || error.code === "qlik-session") dropSession();
       return { ok: false, error };
     } finally {
       emit({ event: "progress", text: "Ready" });
