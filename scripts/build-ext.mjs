@@ -32,4 +32,5 @@ for (const [entry, out] of [
 
 await copyFile(join(src, "manifest.json"), join(outDir, "manifest.json"));
 await copyFile(join(src, "panel", "panel.html"), join(outDir, "panel.html"));
+await copyFile(join(src, "panel", "panel.css"), join(outDir, "panel.css"));
 await copyFile(join(src, "options", "options.html"), join(outDir, "options.html"));
