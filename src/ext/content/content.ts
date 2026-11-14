@@ -18,6 +18,8 @@ const isLink = (v: unknown): v is LinkData => {
 
 const storageKey = (key: string): string => `link:${key}`;
 
+const unlinkedKey = (key: string): string => `unlinked:${key}`;
+
 const cache: LinkCache = {
   async get(key) {
     const stored = (await chrome.storage.local.get(storageKey(key)))[storageKey(key)];
@@ -28,6 +30,13 @@ const cache: LinkCache = {
   },
   async remove(key) {
     await chrome.storage.local.remove(storageKey(key));
+  },
+  async isUnlinked(key) {
+    return (await chrome.storage.local.get(unlinkedKey(key)))[unlinkedKey(key)] === true;
+  },
+  async setUnlinked(key, value) {
+    if (value) await chrome.storage.local.set({ [unlinkedKey(key)]: true });
+    else await chrome.storage.local.remove(unlinkedKey(key));
   },
 };
 

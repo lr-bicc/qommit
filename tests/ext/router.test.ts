@@ -285,6 +285,7 @@ test("connect and unlink", async () => {
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("linked");
   expect(await run({ cmd: "unlink" })).toEqual({ ok: true, value: null });
   expect(app.objects.some((o) => o.props.qInfo.qId === "qommit-link")).toBe(false);
+  expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("unlinked");
 });
 
 test("the router never puts the options or raw error objects into a result", async () => {

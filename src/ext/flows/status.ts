@@ -50,6 +50,7 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
   }
 
   if (!info.published) {
+    if (await cache.isUnlinked(cacheKey(info))) return { state: "unlinked" };
     const cached = await cache.get(cacheKey(info));
     if (cached && sameId(cached.appId, info.id)) return resolveLinked(ports, cached, "local");
   }

@@ -48,6 +48,22 @@ describe("resolveStatus", () => {
     });
   });
 
+  it("unlinked marker, no link object, app in the branch table -> unlinked without calling GitHub", async () => {
+    const { ports, github, cache } = setup({ meta: { repo: REPO, lastCommitId: null } });
+    await cache.setUnlinked(urlFor(APP_ID), true);
+    const calls: string[] = [];
+    const spy = new Proxy(github, { get: (t, k, r) => { const v = Reflect.get(t, k, r); return typeof v === "function" ? (...a: unknown[]) => { calls.push(String(k)); return v.apply(t, a); } : v; } });
+    expect(await resolveStatus({ ...ports, github: spy })).toEqual({ state: "unlinked" });
+    expect(calls).toEqual([]);
+  });
+
+  it("unlinked marker, but the app has a link object with its own id -> linked", async () => {
+    const { ports, app, cache, first } = setup();
+    await cache.setUnlinked(urlFor(APP_ID), true);
+    app.link = { repo: REPO, branch: "main", appId: APP_ID, syncedSha: first };
+    expect(await resolveStatus(ports)).toMatchObject({ state: "linked", stored: "app" });
+  });
+
   it("link, app published -> published", async () => {
     const { ports, app, first } = setup({ info: { published: true } });
     app.link = { repo: REPO, branch: "main", appId: APP_ID, syncedSha: first };

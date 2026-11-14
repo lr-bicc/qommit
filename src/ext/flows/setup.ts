@@ -99,6 +99,7 @@ export async function createRepository(ports: FlowPorts, input: { name?: string 
   const snapshot = await ports.app.read({ includeFiles: true });
   const files = serializeApp(snapshot, { canonicalAppId: snapshot.appId });
 
+  const { login } = await github.whoAmI(); // before createRepo: a failure here must not leave a repository behind
   let created;
   try {
     created = await github.createRepo(name);
@@ -111,7 +112,6 @@ export async function createRepository(ports: FlowPorts, input: { name?: string 
     throw e;
   }
   const { repo, defaultBranch } = created;
-  const { login } = await github.whoAmI();
   const readme = createReadme({
     appTitle: info.title, creatorLogin: login, createdAt: ports.now(),
     sheets: sheetsOf(snapshot), defaultBranch, appUrl: info.url,
@@ -142,13 +142,21 @@ export async function connectRepository(
     const { defaultBranch } = await requireRepo(github, repo);
     await headOf(github, repo, branch);
     const row = { branch, appUrl: info.url };
+    // The link object in the app is the binding record, the row a convenience: when every branch that
+    // could carry the row is protected, the app is linked without it.
     try {
-      syncedSha = await commitRow(ports, repo, defaultBranch, row);
-      syncedSha = await headOf(github, repo, branch);
+      await commitRow(ports, repo, defaultBranch, row);
     } catch (e) {
       if (!isProtected(e)) throw e;
-      syncedSha = await commitRow(ports, repo, branch, row);
+      if (branch !== defaultBranch) {
+        try {
+          await commitRow(ports, repo, branch, row);
+        } catch (e2) {
+          if (!isProtected(e2)) throw e2;
+        }
+      }
     }
+    syncedSha = await headOf(github, repo, branch);
   }
   const link: LinkData = { repo, branch, appId: info.id, syncedSha };
   await saveLink(ports, link);
@@ -181,5 +189,7 @@ export async function unlinkApp(ports: FlowPorts): Promise<void> {
   } catch {
     // The link may live only in the local cache, or the app may not be writable.
   }
-  await ports.cache.remove(cacheKey(info));
+  const key = cacheKey(info);
+  await ports.cache.remove(key);
+  await ports.cache.setUnlinked(key, true);
 }

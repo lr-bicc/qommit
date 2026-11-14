@@ -1,5 +1,6 @@
 import { parseBranchTable } from "../../src/core/repo-layout";
 import { FlowError } from "../../src/ext/flows/ports";
+import { resolveStatus } from "../../src/ext/flows/status";
 import { connectRepository, createBranchForCopy, createRepository, suggestBranchName, unlinkApp } from "../../src/ext/flows/setup";
 import { APP_ID } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
@@ -152,6 +153,50 @@ test("connect to an existing branch whose row is already there commits nothing",
   expect(link.syncedSha).toBe(github.head("lr-bicc/sales", "main"));
 });
 
+test("existing branch, default branch protected: the row lands on the chosen branch", async () => {
+  const { ports, github } = fakePorts();
+  const first = legacyRepo(github);
+  await github.createBranch("lr-bicc/sales", "dev", first);
+  github.protect("lr-bicc/sales", "main");
+  const link = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "dev" });
+  const dev = github.head("lr-bicc/sales", "dev");
+  expect(dev).not.toBe(first);
+  expect(github.messageOf("lr-bicc/sales", dev)).toBe("Update branches table");
+  expect(github.head("lr-bicc/sales", "main")).toBe(first);
+  expect(link.syncedSha).toBe(dev);
+  expect(parseBranchTable(readme(github, dev)).some((r) => r.branch === "dev" && r.appId === APP_ID)).toBe(true);
+});
+
+test("existing branch that is the protected default: no row, the app is linked anyway", async () => {
+  const { ports, github, app } = fakePorts();
+  const first = legacyRepo(github);
+  github.protect("lr-bicc/sales", "main");
+  const count = github.commitCount("lr-bicc/sales");
+  const link = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
+  expect(github.commitCount("lr-bicc/sales")).toBe(count);
+  expect(link).toEqual({ repo: "lr-bicc/sales", branch: "main", appId: APP_ID, syncedSha: first });
+  expect(app.link).toEqual(link);
+});
+
+test("existing branch, both it and the default branch protected: no row, linked on the chosen branch", async () => {
+  const { ports, github } = fakePorts();
+  const first = legacyRepo(github);
+  await github.createBranch("lr-bicc/sales", "dev", first);
+  github.protect("lr-bicc/sales", "main");
+  github.protect("lr-bicc/sales", "dev");
+  const count = github.commitCount("lr-bicc/sales");
+  const link = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "dev" });
+  expect(github.commitCount("lr-bicc/sales")).toBe(count);
+  expect(link).toEqual({ repo: "lr-bicc/sales", branch: "dev", appId: APP_ID, syncedSha: first });
+});
+
+test("a failing whoAmI leaves no repository behind", async () => {
+  const { ports, github } = fakePorts();
+  const failing = { ...github, whoAmI: async () => { throw new Error("offline"); } };
+  await expect(createRepository({ ...ports, github: failing }, { name: "fresh" })).rejects.toThrow("offline");
+  expect(await github.getRepo("lr-bicc/fresh")).toBeNull();
+});
+
 test("connect reports unknown repository, missing branch and taken branch without writing", async () => {
   const { ports, github, app } = fakePorts();
   legacyRepo(github);
@@ -197,6 +242,26 @@ test("unlink removes the link and the cache entry", async () => {
   await unlinkApp(ports);
   expect(app.link).toBeNull();
   expect(cache.entries.size).toBe(0);
+});
+
+test("unlink sticks until the app is connected again", async () => {
+  const { ports, github, cache } = fakePorts();
+  legacyRepo(github);
+  await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
+  await unlinkApp(ports);
+  expect(cache.unlinked.has(URL)).toBe(true);
+  expect(await resolveStatus(ports)).toEqual({ state: "unlinked" });
+  await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
+  expect(cache.unlinked.size).toBe(0);
+  expect(await resolveStatus(ports)).toMatchObject({ state: "linked" });
+});
+
+test("a failing setUnlinked(false) does not fail the link", async () => {
+  const { ports, github, app, cache } = fakePorts();
+  legacyRepo(github);
+  cache.setUnlinked = async () => { throw new Error("storage"); };
+  const link = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
+  expect(app.link).toEqual(link);
 });
 
 test("unlink ignores a failing removeLink", async () => {

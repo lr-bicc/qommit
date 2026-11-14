@@ -212,10 +212,14 @@ export function fakeApp(init: {
   return app;
 }
 
-export function fakeCache(): LinkCache & { entries: Map<string, LinkData> } {
+export function fakeCache(): LinkCache & { entries: Map<string, LinkData>; unlinked: Set<string> } {
   const entries = new Map<string, LinkData>();
+  const unlinked = new Set<string>();
   return {
     entries,
+    unlinked,
+    async isUnlinked(key) { return unlinked.has(key); },
+    async setUnlinked(key, value) { if (value) unlinked.add(key); else unlinked.delete(key); },
     async get(key) { const l = entries.get(key); return l ? { ...l } : null; },
     async set(key, link) { entries.set(key, { ...link }); },
     async remove(key) { entries.delete(key); },

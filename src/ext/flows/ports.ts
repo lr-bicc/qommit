@@ -18,6 +18,9 @@ export interface LinkCache {
   get(key: string): Promise<LinkData | null>;
   set(key: string, link: LinkData): Promise<void>;
   remove(key: string): Promise<void>;
+  /** Set by "Unlink": the app is not offered as linked again from the README table or gitoqlok's metadata. */
+  isUnlinked(key: string): Promise<boolean>;
+  setUnlinked(key: string, value: boolean): Promise<void>;
 }
 
 export interface FlowPorts { app: AppPort; github: GitHubPort; cache: LinkCache; repoPrefix: string; now(): Date }
@@ -40,13 +43,22 @@ export function cacheKey(info: AppInfo): string {
 /** Stores the link in the app object; when that fails, in the local cache. */
 export async function saveLink(ports: FlowPorts, link: LinkData): Promise<"app" | "local"> {
   const key = cacheKey(await ports.app.info());
+  const clearMarker = async (): Promise<void> => {
+    try {
+      await ports.cache.setUnlinked(key, false);
+    } catch {
+      // the marker only hides a link that exists again; failing to clear it must not fail the save
+    }
+  };
   try {
     await ports.app.writeLink(link);
   } catch {
     await ports.cache.set(key, link);
+    await clearMarker();
     return "local";
   }
   await ports.cache.remove(key); // the app object is authoritative; drop a stale local copy
+  await clearMarker();
   return "app";
 }
 
