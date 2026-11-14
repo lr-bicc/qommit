@@ -8,6 +8,7 @@ import { ErrorMessage } from "./ErrorMessage";
 export interface DialogProps {
   run<T>(command: Command): Promise<T>; // rejects with BridgeError
   busy: boolean;
+  isBusy(): boolean; // a command is in flight right now (not yet reflected in `busy`)
   onOptions(): void;
   onCancel(): void;
   onDone(): void;
@@ -21,8 +22,9 @@ export function CreateBranchDialog(props: DialogProps & { suggestedBranch: strin
   const [fromSource, setFromSource] = useState(false);
   const [error, setError] = useState<CommandError | null>(null);
 
-  async function submit(e: Event): Promise<void> {
-    e.preventDefault();
+  async function submit(e?: Event): Promise<void> {
+    e?.preventDefault();
+    if (props.isBusy()) return;
     setError(null);
     try {
       await props.run({ cmd: "createBranch", name: name.trim(), fromSource: props.sourceBranch !== null && fromSource });
@@ -35,7 +37,7 @@ export function CreateBranchDialog(props: DialogProps & { suggestedBranch: strin
   return (
     <Dialog title="Create Branch">
       <form onSubmit={submit}>
-        {error && <ErrorMessage error={error} onOptions={props.onOptions} onRetry={() => setError(null)} disabled={props.busy} />}
+        {error && <ErrorMessage error={error} onOptions={props.onOptions} onRetry={() => void submit()} disabled={props.busy} />}
         <label class="field">
           <span>Branch Name</span>
           <input type="text" value={name} onInput={(e) => setName(e.currentTarget.value)} />

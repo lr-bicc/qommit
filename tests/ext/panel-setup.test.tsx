@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { App } from "../../src/ext/panel/App";
 import { BridgeError } from "../../src/ext/panel/bridge";
 import { installFakeChrome, type FakeChrome } from "./fake-chrome";
+import type { FakeBridge } from "./fake-bridge";
 import { fakeBridge, LINK, LINKED, view } from "./fake-bridge";
 
 let chrome: FakeChrome;
@@ -229,4 +230,160 @@ test("the connect dialog defaults to a new branch with the suggested name", asyn
   fireEvent.click(within(dialog).getByText("Connect"));
   await within(dialog).findByText("Branch already exists.");
   expect(bridge.commands[3]).toEqual({ cmd: "connect", repo: "lr-bicc/sales", mode: "new-branch", branch: "r.vasilev" });
+});
+
+const net = () => new BridgeError({ code: "network", message: "x" });
+
+/** Makes the next `cmd` answers stay pending until `release()` is called. */
+function holdCommand(bridge: FakeBridge, cmd: string): { release(): void } {
+  const inner = bridge.send.bind(bridge);
+  let release = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  bridge.send = (async (command) => {
+    const answer = inner(command); // records the command right away
+    if (command.cmd === cmd) await gate;
+    return answer;
+  }) as FakeBridge["send"];
+  return { release };
+}
+
+test("Retry in the connect dialog loads the repository list again", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "unlinked" })],
+    listRepos: [net(), [{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+  });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Connect to existing repository"));
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByText("Network error.");
+  fireEvent.click(within(dialog).getByText("Retry"));
+  await within(dialog).findByText("lr-bicc/sales");
+  expect(bridge.commands.filter((c) => c.cmd === "listRepos")).toHaveLength(2);
+});
+
+test("Retry in the connect dialog loads the branches of the chosen repository again", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "unlinked" })],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listBranches: [net(), { defaultBranch: "main", branches: ["main"] }],
+  });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Connect to existing repository"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(await within(dialog).findByText("lr-bicc/sales"));
+  await within(dialog).findByText("Network error.");
+  fireEvent.click(within(dialog).getByText("Retry"));
+  await within(dialog).findByLabelText("Branch name");
+  expect(bridge.commands.filter((c) => c.cmd === "listBranches")).toEqual([
+    { cmd: "listBranches", repo: "lr-bicc/sales" }, { cmd: "listBranches", repo: "lr-bicc/sales" },
+  ]);
+});
+
+test("Retry after a failed connect submits again", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "unlinked" }), view(LINKED)],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listBranches: [{ defaultBranch: "main", branches: ["main"] }],
+    connect: [net(), LINK],
+  });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Connect to existing repository"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(await within(dialog).findByText("lr-bicc/sales"));
+  await within(dialog).findByLabelText("Branch name");
+  fireEvent.click(within(dialog).getByText("Connect"));
+  await within(dialog).findByText("Network error.");
+  fireEvent.click(within(dialog).getByText("Retry"));
+  await screen.findByText("Local Changes");
+  expect(bridge.commands.filter((c) => c.cmd === "connect")).toHaveLength(2);
+});
+
+test("Retry after a failed createBranch submits again", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "duplicated", source: { repo: "lr-bicc/sales", branch: null, syncedSha: null }, defaultBranch: "main" }), view(LINKED)],
+    createBranch: [net(), LINK],
+  });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Create Branch"));
+  fireEvent.click(screen.getAllByText("Create Branch").at(-1)!);
+  await screen.findByText("Network error.");
+  fireEvent.click(screen.getByText("Retry"));
+  await screen.findByText("Local Changes");
+  expect(bridge.commands.filter((c) => c.cmd === "createBranch")).toHaveLength(2);
+});
+
+test("two immediate clicks on Create repository send one command and lock the buttons", async () => {
+  const bridge = fakeBridge({ status: [view({ state: "unlinked" }), view(LINKED)], createRepository: [LINK] });
+  const gate = holdCommand(bridge, "createRepository");
+  render(<App bridge={bridge} />);
+  const create = await screen.findByText("Create repository");
+  create.click(); // native clicks: no render happens in between, as with two fast real clicks
+  create.click();
+  expect(bridge.commands.filter((c) => c.cmd === "createRepository")).toHaveLength(1);
+  await waitFor(() => expect((screen.getByText("Connect to existing repository") as HTMLButtonElement).disabled).toBe(true));
+  expect((create as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByTitle("Refresh") as HTMLButtonElement).disabled).toBe(true);
+  gate.release();
+  await screen.findByText("lr-bicc/sales");
+});
+
+test("the header buttons are locked while a command is pending", async () => {
+  const bridge = fakeBridge({ status: [view(LINKED)] });
+  render(<App bridge={bridge} />);
+  await screen.findByText("lr-bicc/sales");
+  const gate = holdCommand(bridge, "status");
+  fireEvent.click(screen.getByTitle("Refresh"));
+  await waitFor(() => expect((screen.getByTitle("Unlink repository") as HTMLButtonElement).disabled).toBe(true));
+  expect((screen.getByTitle("Refresh") as HTMLButtonElement).disabled).toBe(true);
+  gate.release();
+  await waitFor(() => expect((screen.getByTitle("Refresh") as HTMLButtonElement).disabled).toBe(false));
+});
+
+test("two immediate clicks on the dialog's Create Branch send one command", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "duplicated", source: { repo: "lr-bicc/sales", branch: null, syncedSha: null }, defaultBranch: "main" }), view(LINKED)],
+    createBranch: [LINK],
+  });
+  const gate = holdCommand(bridge, "createBranch");
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Create Branch"));
+  const submit = screen.getAllByText("Create Branch").at(-1)!;
+  submit.click();
+  submit.click();
+  expect(bridge.commands.filter((c) => c.cmd === "createBranch")).toHaveLength(1);
+  gate.release();
+  await screen.findByText("Local Changes");
+});
+
+test("two immediate clicks on Connect send one command", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "unlinked" }), view(LINKED)],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listBranches: [{ defaultBranch: "main", branches: ["main"] }],
+    connect: [LINK],
+  });
+  const gate = holdCommand(bridge, "connect");
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Connect to existing repository"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(await within(dialog).findByText("lr-bicc/sales"));
+  await within(dialog).findByLabelText("Branch name");
+  const connect = within(dialog).getByText("Connect");
+  connect.click();
+  connect.click();
+  expect(bridge.commands.filter((c) => c.cmd === "connect")).toHaveLength(1);
+  gate.release();
+  await screen.findByText("Local Changes");
+});
+
+test("a failed unlink keeps the confirmation open with the error and can be repeated", async () => {
+  const bridge = fakeBridge({ status: [view(LINKED), view({ state: "unlinked" })], unlink: [net(), null] });
+  render(<App bridge={bridge} />);
+  await screen.findByText("lr-bicc/sales");
+  fireEvent.click(screen.getByTitle("Unlink repository"));
+  fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
+  await within(screen.getByRole("dialog")).findByText("Network error.");
+  fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
+  await screen.findByText("No linked repository");
+  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "unlink", "unlink", "status"]);
 });

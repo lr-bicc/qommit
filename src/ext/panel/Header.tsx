@@ -1,5 +1,9 @@
 import type { JSX } from "preact";
+import { useState } from "preact/hooks";
+import type { CommandError } from "../shared/commands";
+import { toCommandError, type DialogProps } from "./CreateBranchDialog";
 import { Dialog } from "./Dialog";
+import { ErrorMessage } from "./ErrorMessage";
 
 export interface HeaderProps {
   title: string;
@@ -36,11 +40,25 @@ export function Header(props: HeaderProps): JSX.Element {
   );
 }
 
-export function UnlinkDialog(props: { repo: string; busy: boolean; onConfirm(): void; onCancel(): void }): JSX.Element {
+export function UnlinkDialog(props: DialogProps & { repo: string }): JSX.Element {
+  const [error, setError] = useState<CommandError | null>(null);
+
+  async function confirm(): Promise<void> {
+    if (props.isBusy()) return;
+    setError(null);
+    try {
+      await props.run({ cmd: "unlink" });
+      props.onDone();
+    } catch (e) {
+      setError(toCommandError(e));
+    }
+  }
+
   return (
     <Dialog title={`Unlink this app from ${props.repo}?`}>
+      {error && <ErrorMessage error={error} onOptions={props.onOptions} onRetry={() => void confirm()} disabled={props.busy} />}
       <div class="buttons">
-        <button type="button" class="primary" disabled={props.busy} onClick={props.onConfirm}>Unlink</button>
+        <button type="button" class="primary" disabled={props.busy} onClick={() => void confirm()}>Unlink</button>
         <button type="button" disabled={props.busy} onClick={props.onCancel}>Cancel</button>
       </div>
     </Dialog>

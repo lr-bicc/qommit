@@ -14,31 +14,37 @@ export interface Bridge {
 }
 
 export function createBridge(tabId: number): Bridge {
-  /** The answer of the content script of the tab, or undefined when nobody answered. */
-  async function attempt(command: Command): Promise<CommandResult | undefined> {
+  type Attempt = { kind: "answer"; result: CommandResult } | { kind: "none" } | { kind: "rejected"; message: string };
+
+  async function attempt(command: Command): Promise<Attempt> {
     try {
-      return (await chrome.tabs.sendMessage(tabId, { target: "content", command })) as CommandResult | undefined;
-    } catch {
-      return undefined; // no receiver: the content script is not loaded in this tab
+      const result = (await chrome.tabs.sendMessage(tabId, { target: "content", command })) as CommandResult | undefined;
+      return result === undefined ? { kind: "none" } : { kind: "answer", result };
+    } catch (e) {
+      return { kind: "rejected", message: e instanceof Error ? e.message : String(e) };
     }
   }
 
+  const noContent = (): BridgeError =>
+    new BridgeError({ code: "no-content", message: "The Qlik page does not answer. Reload it and open Qommit again." });
+
   return {
     async send<T>(command: Command): Promise<T> {
-      let result = await attempt(command);
-      if (result === undefined) {
+      let first = await attempt(command);
+      // Only "no receiver" proves the command was not delivered; any other failure may have run it already.
+      if (first.kind === "rejected" && first.message.includes("Receiving end does not exist")) {
         try {
           await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
         } catch {
-          // the retry below reports the failure
+          throw noContent();
         }
-        result = await attempt(command);
+        first = await attempt(command);
+        if (first.kind !== "answer") throw noContent();
+      } else if (first.kind !== "answer") {
+        throw new BridgeError({ code: "interrupted", message: "The command was interrupted." });
       }
-      if (result === undefined) {
-        throw new BridgeError({ code: "no-content", message: "The Qlik page does not answer. Reload it and open Qommit again." });
-      }
-      if (!result.ok) throw new BridgeError(result.error);
-      return result.value as T;
+      if (!first.result.ok) throw new BridgeError(first.result.error);
+      return first.result.value as T;
     },
 
     onProgress(listener) {

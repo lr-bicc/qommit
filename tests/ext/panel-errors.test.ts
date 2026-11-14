@@ -12,6 +12,7 @@ test.each([
   ["network", "Network error.", "retry"],
   ["qlik-session", "Qlik session lost. Sign in to Qlik again or reload the page.", "retry"],
   ["qlik-read", "Qlik session lost. Sign in to Qlik again or reload the page.", "retry"],
+  ["interrupted", "The page changed while the command was running. Refresh to see the current state.", undefined],
   ["no-content", "Reload the Qlik page and open Qommit again.", undefined],
   ["branch-exists", "Branch already exists.", undefined],
   ["invalid-branch-name", "Invalid branch name.", undefined],

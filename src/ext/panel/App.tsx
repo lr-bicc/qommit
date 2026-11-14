@@ -47,6 +47,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [tab, setTab] = useState<"changes" | "history">("changes");
   const alive = useRef(true);
+  const inflight = useRef(0); // commands in flight; unlike `running` it is current before the next render
   const busy = running > 0;
 
   useEffect(() => bridge.onProgress(setProgress), [bridge]);
@@ -54,10 +55,12 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
 
   /** Sends a command; the buttons stay locked until it is answered. Rejects with BridgeError. */
   const run = useCallback(async <T,>(command: Command): Promise<T> => {
+    inflight.current++;
     setRunning((n) => n + 1);
     try {
       return await bridge.send<T>(command);
     } finally {
+      inflight.current--;
       if (alive.current) setRunning((n) => n - 1);
     }
   }, [bridge]);
@@ -77,6 +80,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
 
   /** A command that changes the link: on success the status is loaded again. */
   async function mutate(command: Command, onError?: (error: CommandError) => boolean): Promise<void> {
+    if (inflight.current > 0) return;
     setError(null);
     try {
       await run(command);
@@ -94,7 +98,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
   const known = status ? repoOf(status) : null;
   const unlinkRepo = known?.repo ?? (status?.state === "duplicated" ? status.source.repo : null);
   const closeDialog = (): void => setDialog(null);
-  const dialogProps = { run, busy, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); void load(); } };
+  const dialogProps = { run, busy, isBusy: () => inflight.current > 0, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); void load(); } };
 
   let body: JSX.Element | null = null;
   if (view?.page === "hub") {
@@ -160,12 +164,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
         />
       )}
       {dialog === "unlink" && unlinkRepo !== null && (
-        <UnlinkDialog
-          repo={unlinkRepo}
-          busy={busy}
-          onCancel={closeDialog}
-          onConfirm={() => { setDialog(null); void mutate({ cmd: "unlink" }); }}
-        />
+        <UnlinkDialog {...dialogProps} repo={unlinkRepo} />
       )}
       <footer class="footer" aria-live="polite">{progress}</footer>
     </main>

@@ -6,32 +6,42 @@ beforeEach(() => {
   chrome = installFakeChrome();
 });
 
-test("injects content.js once when nobody answers, then retries", async () => {
-  let calls = 0;
-  chrome.respond = () => (++calls === 1 ? undefined : { ok: true, value: "pong" });
-  const bridge = createBridge(5);
-  await expect(bridge.send({ cmd: "ping" })).resolves.toBe("pong");
-  expect(chrome.injected).toEqual([{ tabId: 5, files: ["content.js"] }]);
-  expect(chrome.tabMessages.map((m) => m.message)).toEqual([
-    { target: "content", command: { cmd: "ping" } },
-    { target: "content", command: { cmd: "ping" } },
-  ]);
-});
+const NO_RECEIVER = "Could not establish connection. Receiving end does not exist.";
 
-test("a rejected first attempt also triggers the injection", async () => {
+test("injects content.js and resends when the tab has no content script", async () => {
   let calls = 0;
   chrome.respond = () => {
-    if (++calls === 1) throw new Error("Could not establish connection");
-    return { ok: true, value: 1 };
+    if (++calls === 1) throw new Error(NO_RECEIVER);
+    return { ok: true, value: "pong" };
   };
-  await expect(createBridge(5).send({ cmd: "status" })).resolves.toBe(1);
-  expect(chrome.injected).toHaveLength(1);
+  await expect(createBridge(5).send({ cmd: "ping" })).resolves.toBe("pong");
+  expect(chrome.injected).toEqual([{ tabId: 5, files: ["content.js"] }]);
+  expect(chrome.tabMessages).toHaveLength(2);
 });
 
-test("no answer after the injection is a no-content error", async () => {
+test("any other rejection is interrupted: no injection, no second send", async () => {
+  chrome.respond = () => {
+    throw new Error("The message port closed before a response was received.");
+  };
+  await expect(createBridge(5).send({ cmd: "createRepository" })).rejects.toMatchObject({ error: { code: "interrupted" } });
+  expect(chrome.injected).toEqual([]);
+  expect(chrome.tabMessages).toHaveLength(1);
+});
+
+test("an undefined answer is interrupted: no injection, no second send", async () => {
   chrome.respond = () => undefined;
+  await expect(createBridge(5).send({ cmd: "commit", message: "m", paths: [], removeUnmaintained: false, allowBehind: false })).rejects.toMatchObject({ error: { code: "interrupted" } });
+  expect(chrome.injected).toEqual([]);
+  expect(chrome.tabMessages).toHaveLength(1);
+});
+
+test("a failing retry after the injection is a no-content error", async () => {
+  chrome.respond = () => {
+    throw new Error(NO_RECEIVER);
+  };
   await expect(createBridge(5).send({ cmd: "ping" })).rejects.toMatchObject({ error: { code: "no-content" } });
   expect(chrome.injected).toHaveLength(1);
+  expect(chrome.tabMessages).toHaveLength(2);
 });
 
 test("a failed result rejects with a BridgeError carrying the error", async () => {

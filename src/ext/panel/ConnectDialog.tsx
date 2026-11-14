@@ -16,11 +16,19 @@ export function ConnectDialog(props: DialogProps & { suggestedBranch: string }):
   const [mode, setMode] = useState<"new-branch" | "existing-branch">("new-branch");
   const [newName, setNewName] = useState(props.suggestedBranch);
   const [existing, setExisting] = useState("");
-  const [error, setError] = useState<CommandError | null>(null);
+  const [error, setError] = useState<{ error: CommandError; retry(): void } | null>(null);
 
-  useEffect(() => {
-    props.run<RepoRef[]>({ cmd: "listRepos" }).then(setRepos, (e) => { setRepos([]); setError(toCommandError(e)); });
-  }, []);
+  async function loadRepos(): Promise<void> {
+    setError(null);
+    try {
+      setRepos(await props.run<RepoRef[]>({ cmd: "listRepos" }));
+    } catch (e) {
+      setRepos([]);
+      setError({ error: toCommandError(e), retry: () => void loadRepos() });
+    }
+  }
+
+  useEffect(() => { void loadRepos(); }, []);
 
   async function choose(name: string): Promise<void> {
     setRepo(name);
@@ -31,20 +39,19 @@ export function ConnectDialog(props: DialogProps & { suggestedBranch: string }):
       setBranches(found);
       setExisting(found.defaultBranch);
     } catch (e) {
-      setRepo(null);
-      setError(toCommandError(e));
+      setError({ error: toCommandError(e), retry: () => void choose(name) });
     }
   }
 
-  async function submit(e: Event): Promise<void> {
-    e.preventDefault();
-    if (repo === null) return;
+  async function submit(e?: Event): Promise<void> {
+    e?.preventDefault();
+    if (repo === null || props.isBusy()) return;
     setError(null);
     try {
       await props.run({ cmd: "connect", repo, mode, branch: mode === "new-branch" ? newName.trim() : existing });
       props.onDone();
     } catch (err) {
-      setError(toCommandError(err));
+      setError({ error: toCommandError(err), retry: () => void submit() });
     }
   }
 
@@ -55,7 +62,7 @@ export function ConnectDialog(props: DialogProps & { suggestedBranch: string }):
   return (
     <Dialog title="Connect to existing repository">
       <form onSubmit={submit}>
-        {error && <ErrorMessage error={error} onOptions={props.onOptions} onRetry={() => setError(null)} disabled={props.busy} />}
+        {error && <ErrorMessage error={error.error} onOptions={props.onOptions} onRetry={error.retry} disabled={props.busy} />}
         <input type="search" placeholder="Search repositories" aria-label="Search repositories" value={search} onInput={(e) => setSearch(e.currentTarget.value)} />
         <ul class="repo-list">
           {repos === null && <li class="muted">Loading…</li>}
