@@ -116,7 +116,7 @@ test("traversal and malformed refs, shas, paths and names are rejected before an
     { op: "readTextFile", args: ["lr-bicc/app", "main", "/abs.json"] },
     { op: "compare", args: ["lr-bicc/app", "../x", "main"] },
     { op: "compare", args: ["lr-bicc/app", "main", "a\\b"] },
-    { op: "listCommits", args: ["lr-bicc/app", "a#b", 1] },
+    { op: "listCommits", args: ["lr-bicc/app", "a..b", 1] },
     { op: "createBranch", args: ["lr-bicc/app", "x", "../y"] },
     { op: "createBranch", args: ["lr-bicc/app", "a//b", "abc123"] },
     commit({ parentSha: "../../x" }),
@@ -139,4 +139,31 @@ test("branch names and paths with slashes, spaces and non-ASCII letters still re
   await handleGateway({ op: "readTextFile", args: ["lr-bicc/app", "main", "appcontent/Stock Availability.png"] }, deps);
   await handleGateway({ op: "readTextFile", args: ["lr-bicc/app", "v1.0", "data_load_script/Überblick.qvs"] }, deps);
   expect(m.calls.length).toBe(3);
+});
+
+test("commit paths with %, # and spaces reach fetch; malformed commit paths do not", async () => {
+  const R = "/repos/lr-bicc/app";
+  const { m, deps } = setup({
+    [`GET ${R}/git/commits/abc123`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: "t1" } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const commit = (path: string) => ({ op: "commitFiles", args: ["lr-bicc/app", { branch: "main", parentSha: "abc123", message: "m",
+    changes: [{ path, content: { text: "x" } }] }] });
+  for (const path of ["a/../b", "/a", "a//b", "a/", "a\nb", "a/\u007fb"]) {
+    expect(await handleGateway(commit(path) as never, deps), JSON.stringify(path)).toMatchObject({ ok: false, error: { kind: "not-allowed" } });
+  }
+  expect(m.calls.length).toBe(0);
+  for (const path of ["data_load_script/Margin %.qvs", "data_load_script/Sales #1.qvs", "appcontent/100%.png"]) {
+    expect(await handleGateway(commit(path) as never, deps), path).toEqual({ ok: true, value: "c1" });
+  }
+  const trees = m.calls.filter((c) => c.url.endsWith("/git/trees")).map((c) => (c.body as { tree: { path: string }[] }).tree[0].path);
+  expect(trees).toEqual(["data_load_script/Margin %.qvs", "data_load_script/Sales #1.qvs", "appcontent/100%.png"]);
+});
+
+test("a branch name the flows accept is accepted by the gateway", async () => {
+  const { m, deps } = setup({ "GET /repos/lr-bicc/app/git/ref/heads/feature/100%25": () => ({ body: { object: { sha: "c1" } } }) });
+  expect(await handleGateway({ op: "getBranchSha", args: ["lr-bicc/app", "feature/100%"] }, deps)).toEqual({ ok: true, value: "c1" });
+  expect(m.calls.length).toBe(1);
 });

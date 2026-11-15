@@ -29,7 +29,7 @@ function parseCommitInput(v: unknown): { branch: string; parentSha: string; mess
   if (!isValidArg("ref", v.branch) || !isValidArg("sha", v.parentSha)) return null;
   const changes: FileChange[] = [];
   for (const c of v.changes) {
-    if (!isObject(c) || !isString(c.path) || !isValidArg("path", c.path)) return null;
+    if (!isObject(c) || !isString(c.path) || !isValidCommitPath(c.path)) return null;
     if (c.content === null) changes.push({ path: c.path, content: null });
     else if (isWireContent(c.content)) {
       try {
@@ -91,6 +91,15 @@ const ARG_KINDS: Partial<Record<keyof GitHubPort, Record<number, ArgKind>>> = {
   compare: { 1: "ref", 2: "ref" },
 };
 
+/**
+ * Commit paths travel in the JSON body, never in a URL: anything a file name can hold is allowed,
+ * except empty, absolute or dot segments and control characters.
+ */
+function isValidCommitPath(path: string): boolean {
+  if (path === "" || /[\u0000-\u001f\u007f]/.test(path)) return false;
+  return path.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
 /** Rejects values that could climb out of the repository path or alter the URL. */
 function isSafeSegments(value: string): boolean {
   if (value === "" || value.startsWith("/")) return false;
@@ -101,6 +110,7 @@ function isSafeSegments(value: string): boolean {
 function isValidArg(kind: ArgKind, value: string): boolean {
   if (kind === "sha") return /^[0-9a-f]{4,40}$/i.test(value);
   if (kind === "name") return isValidName(value);
+  if (kind === "ref") return repoApi.isValidRefName(value); // refs reach URLs only through per-segment encoding
   return isSafeSegments(value);
 }
 
