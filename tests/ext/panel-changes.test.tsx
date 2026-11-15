@@ -9,6 +9,7 @@ import { LocalChangesTab } from "../../src/ext/panel/LocalChangesTab";
 import type { Command } from "../../src/ext/shared/commands";
 import { installFakeChrome } from "./fake-chrome";
 import { fakeBridge, LINKED, view, type FakeBridge } from "./fake-bridge";
+import { APP_ID } from "../fixtures/snapshot";
 
 beforeEach(() => {
   installFakeChrome();
@@ -56,7 +57,7 @@ test("saves the selected paths, shows Success and loads status and changes again
   fireEvent.click(screen.getByText("Save"));
   await screen.findByText("Success");
   expect(bridge.commands.find((c) => c.cmd === "commit")).toEqual({
-    cmd: "commit", message: "Fix", paths: ["objects/sheets/s2.json"], removeUnmaintained: true, allowBehind: false,
+    cmd: "commit", appId: APP_ID, message: "Fix", paths: ["objects/sheets/s2.json"], removeUnmaintained: true, allowBehind: false,
   });
   await waitFor(() => expect(second.held).toHaveLength(1));
   await waitFor(() => expect(bridge.commands.filter((c) => c.cmd === "status")).toHaveLength(2));
@@ -290,7 +291,7 @@ test("collapsed groups still count towards the selection", async () => {
 
 test("a published app shows the list only", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO)] });
-  render(<LocalChangesTab bridge={bridge} readOnly={true} onSaved={() => undefined} />);
+  render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={true} onSaved={() => undefined} />);
   await screen.findByText("Overview");
   expect(screen.queryByText("Save changes")).toBeNull();
 });
@@ -306,16 +307,16 @@ test("Refresh in the header loads the local changes again", async () => {
 
 test("a changed reload token loads the changes again", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])] });
-  const { rerender } = render(<LocalChangesTab bridge={bridge} readOnly={false} onSaved={() => undefined} reloadToken={0} />);
+  const { rerender } = render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={0} />);
   await screen.findByText("Overview");
-  rerender(<LocalChangesTab bridge={bridge} readOnly={false} onSaved={() => undefined} reloadToken={1} />);
+  rerender(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={1} />);
   await screen.findByText("No local changes");
 });
 
 test("onSaved is called after a successful save", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])], commit: [{ sha: "n" }] });
   const onSaved = vi.fn();
-  render(<LocalChangesTab bridge={bridge} readOnly={false} onSaved={onSaved} />);
+  render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={onSaved} />);
   fireEvent.click(await screen.findByText("Save changes"));
   fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
   fireEvent.click(screen.getByText("Save"));
@@ -393,7 +394,7 @@ test("Retry after a failed commit sends what the form shows now, with the behind
   fireEvent.click(within(alert).getByText("Retry"));
   await screen.findByText("Success");
   const commits = bridge.commands.filter((c) => c.cmd === "commit");
-  expect(commits[1]).toEqual({ cmd: "commit", message: "Better", paths: ["objects/sheets/s2.json"], removeUnmaintained: false, allowBehind: false });
+  expect(commits[1]).toEqual({ cmd: "commit", appId: APP_ID, message: "Better", paths: ["objects/sheets/s2.json"], removeUnmaintained: false, allowBehind: false });
 });
 
 test("a failed Commit anyway stays in the dialog and sends allowBehind only per click", async () => {

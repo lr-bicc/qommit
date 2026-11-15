@@ -1,8 +1,9 @@
 import type { JSX } from "preact";
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { parseQlikUrl } from "../../qlik/location";
 import type { Command, CommandError, StatusView } from "../shared/commands";
 import type { AppStatus } from "../flows/status";
-import type { Bridge } from "./bridge";
+import { BridgeError, type Bridge } from "./bridge";
 import { ConnectDialog } from "./ConnectDialog";
 import { CreateBranchDialog, toCommandError } from "./CreateBranchDialog";
 import { ErrorMessage } from "./ErrorMessage";
@@ -12,6 +13,15 @@ import { LocalChangesTab } from "./LocalChangesTab";
 import { SetupViews } from "./SetupViews";
 
 type DialogKind = "connect" | "branch" | "unlink";
+
+/** What a tab shows: the panel reloads when this changes, not on every sheet change. */
+interface PageKey { kind: "hub" | "app" | "other"; appId: string | null }
+
+function pageOfUrl(url: string): PageKey {
+  const loc = parseQlikUrl(url);
+  if (loc === null) return { kind: "other", appId: null };
+  return loc.appId === null ? { kind: "hub", appId: null } : { kind: "app", appId: loc.appId.toLowerCase() };
+}
 
 /** The repository an app is (or was) linked to, for the header and the unlink question. */
 function repoOf(status: AppStatus): { repo: string; branch: string | null } | null {
@@ -39,7 +49,7 @@ export function App(props: { bridge: Bridge | null }): JSX.Element {
   return <Panel bridge={bridge} />;
 }
 
-function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
+function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   const [view, setView] = useState<StatusView | null>(null);
   const [error, setError] = useState<CommandError | null>(null);
   const [running, setRunning] = useState(0);
@@ -49,7 +59,26 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
   const [reloadToken, setReloadToken] = useState(0); // a new value makes the open tab load its data again
   const alive = useRef(true);
   const inflight = useRef(0); // commands in flight; unlike `running` it is current before the next render
+  const shown = useRef<PageKey | null>(null); // the page the shown status belongs to
+  const reload = useRef<() => Promise<void>>(async () => undefined);
   const busy = running > 0;
+
+  /** The tab's bridge, except that "app-changed" closes any dialog and reloads the status before it is reported. */
+  const bridge = useMemo<Bridge>(() => ({
+    ...tabBridge,
+    async send<T>(command: Command): Promise<T> {
+      try {
+        return await tabBridge.send<T>(command);
+      } catch (e) {
+        if (e instanceof BridgeError && e.error.code === "app-changed" && alive.current) {
+          setDialog(null);
+          await reload.current();
+          if (alive.current) setError(e.error);
+        }
+        throw e;
+      }
+    },
+  }), [tabBridge]);
 
   useEffect(() => bridge.onProgress(setProgress), [bridge]);
   useEffect(() => () => { alive.current = false; }, []);
@@ -71,6 +100,8 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
     try {
       const next = await run<StatusView>({ cmd: "status" });
       if (!alive.current) return;
+      if (next.page === "app") shown.current = { kind: "app", appId: next.app.id.toLowerCase() };
+      else if (shown.current?.kind !== "other") shown.current = { kind: "hub", appId: null };
       setView(next);
       setError(null);
     } catch (e) {
@@ -79,6 +110,17 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
   }, [run]);
 
   useEffect(() => { void load(); }, [load]);
+  reload.current = load;
+
+  // A new URL in the tab: reload when it shows another kind of page or another app.
+  useEffect(() => bridge.onTabUrl((url) => {
+    const next = pageOfUrl(url);
+    const current = shown.current;
+    if (current !== null && current.kind === next.kind && current.appId === next.appId) return;
+    shown.current = next;
+    setDialog(null);
+    void load();
+  }), [bridge, load]);
 
   /** A command that changes the link: on success the status is loaded again. */
   async function mutate(command: Command, onError?: (error: CommandError) => boolean): Promise<void> {
@@ -100,11 +142,17 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
   const known = status ? repoOf(status) : null;
   const unlinkRepo = known?.repo ?? (status?.state === "duplicated" ? status.source.repo : null);
   const closeDialog = (): void => setDialog(null);
-  const dialogProps = { run, busy, isBusy: () => inflight.current > 0, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); void load(); } };
+  const appId = app?.app.id ?? "";
+  const dialogProps = { run, appId, busy, isBusy: () => inflight.current > 0, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); void load(); } };
 
   let body: JSX.Element | null = null;
   if (view?.page === "hub") {
-    body = <section class="view"><p>Open an app to use Qommit.</p></section>;
+    body = (
+      <section class="view">
+        <p>Open an app to use Qommit.</p>
+        <button type="button" disabled={busy} onClick={() => void load()}>Refresh</button>
+      </section>
+    );
   } else if (app && status) {
     if (status.state === "linked") {
       body = (
@@ -114,7 +162,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
             <button type="button" role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>History</button>
           </div>
           {tab === "changes"
-            ? <LocalChangesTab bridge={bridge} readOnly={false} onSaved={() => void load(false)} reloadToken={reloadToken} />
+            ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} onSaved={() => void load(false)} reloadToken={reloadToken} />
             : <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken} />}
         </>
       );
@@ -123,6 +171,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
         <>
           <SetupViews
             status={status}
+            appId={appId}
             busy={busy}
             mutate={mutate}
             onConnect={() => setDialog("connect")}
@@ -130,7 +179,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
             onUnlink={() => setDialog("unlink")}
           />
           {status.state === "published" && status.syncedSha !== null && status.syncedSha !== "" && (
-            <LocalChangesTab bridge={bridge} readOnly={true} onSaved={() => void load(false)} reloadToken={reloadToken} />
+            <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={true} onSaved={() => void load(false)} reloadToken={reloadToken} />
           )}
         </>
       );

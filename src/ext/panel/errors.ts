@@ -21,6 +21,7 @@ export function errorText(error: CommandError): ErrorText {
     case "network": return { text: "Network error.", action: "retry" };
     case "qlik-session":
     case "qlik-read": return { text: "Qlik session lost. Sign in to Qlik again or reload the page.", action: "retry" };
+    case "app-changed": return { text: "This tab now shows a different app. Qommit has refreshed." };
     case "interrupted": return { text: "The page changed while the command was running. Refresh to see the current state." };
     case "no-content": return { text: "Reload the Qlik page and open Qommit again." };
     case "branch-exists": return { text: "Branch already exists." };

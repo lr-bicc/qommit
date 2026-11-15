@@ -261,7 +261,7 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
   expect(first).toMatchObject({ page: "app", status: { state: "unlinked" } });
 
   // 2. create the repository from the app
-  const link = value<{ repo: string; branch: string; syncedSha: string }>(await run({ cmd: "createRepository" }));
+  const link = value<{ repo: string; branch: string; syncedSha: string }>(await run({ cmd: "createRepository", appId: APP_ID }));
   expect(link.repo).toMatch(new RegExp(`^${ORG}/`));
   expect(gh.has(link.repo)).toBe(true);
   expect(link.syncedSha).toBe(gh.head(link.repo, link.branch));
@@ -291,7 +291,7 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
 
   // 5. save only the sheet
   const saved = value<{ sha: string }>(await run({
-    cmd: "commit", message: "Rename sheet", paths: [sheet.path], removeUnmaintained: false, allowBehind: false,
+    cmd: "commit", appId: APP_ID, message: "Rename sheet", paths: [sheet.path], removeUnmaintained: false, allowBehind: false,
   }));
   expect(saved.sha).toMatch(/^[0-9a-f]{40}$/);
   expect(gh.head(link.repo, link.branch)).toBe(saved.sha);

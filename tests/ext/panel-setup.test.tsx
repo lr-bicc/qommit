@@ -5,6 +5,10 @@ import { BridgeError } from "../../src/ext/panel/bridge";
 import { installFakeChrome, type FakeChrome } from "./fake-chrome";
 import type { FakeBridge } from "./fake-bridge";
 import { fakeBridge, LINK, LINKED, view } from "./fake-bridge";
+import { APP_ID } from "../fixtures/snapshot";
+
+const OTHER_ID = "33333333-3333-4333-8333-333333333333";
+const APP_URL = `https://qlik.example.com/sense/app/${APP_ID}`;
 
 let chrome: FakeChrome;
 beforeEach(() => {
@@ -29,7 +33,7 @@ test("a copy creates a branch with the suggested name", async () => {
   fireEvent.click(screen.getByLabelText(/Branch off from the branch/));
   fireEvent.click(screen.getAllByText("Create Branch").at(-1)!);
   await screen.findByText("lr-bicc/sales");
-  expect(bridge.commands[1]).toEqual({ cmd: "createBranch", name: "r.vasilev", fromSource: true });
+  expect(bridge.commands[1]).toEqual({ cmd: "createBranch", appId: APP_ID, name: "r.vasilev", fromSource: true });
 });
 
 test("an existing branch name keeps the dialog open with the message", async () => {
@@ -129,8 +133,8 @@ test("a taken repository name offers connecting or the suggestion", async () => 
   await screen.findByText("A repository named lr-sales already exists.");
   fireEvent.click(screen.getByText("Create as lr-sales-1111"));
   await screen.findByText("lr-bicc/sales");
-  expect(bridge.commands[2]).toEqual({ cmd: "createRepository", name: "lr-sales-1111" });
-  expect(bridge.commands[1]).toEqual({ cmd: "createRepository" });
+  expect(bridge.commands[2]).toEqual({ cmd: "createRepository", appId: APP_ID, name: "lr-sales-1111" });
+  expect(bridge.commands[1]).toEqual({ cmd: "createRepository", appId: APP_ID });
 });
 
 test("branch-missing offers Create Branch and Connect", async () => {
@@ -152,6 +156,7 @@ test("repo-missing: Unlink Repository asks first, then unlinks and reloads", asy
   fireEvent.click(within(dialog).getByText("Unlink"));
   await screen.findByText("No linked repository");
   expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "status"]);
+  expect(bridge.commands.find((c) => c.cmd === "unlink")).toEqual({ cmd: "unlink", appId: APP_ID });
 });
 
 test("the header Unlink sends only after the confirmation and Cancel does nothing", async () => {
@@ -211,7 +216,7 @@ test("the connect dialog filters repositories and connects to an existing branch
   fireEvent.click(within(dialog).getByText("Connect"));
   await screen.findByText("Local Changes");
   expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "listRepos", "listBranches", "connect", "status"]);
-  expect(bridge.commands[3]).toEqual({ cmd: "connect", repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
+  expect(bridge.commands[3]).toEqual({ cmd: "connect", appId: APP_ID, repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
 });
 
 test("the connect dialog defaults to a new branch with the suggested name", async () => {
@@ -229,7 +234,7 @@ test("the connect dialog defaults to a new branch with the suggested name", asyn
   expect(input.value).toBe("r.vasilev");
   fireEvent.click(within(dialog).getByText("Connect"));
   await within(dialog).findByText("Branch already exists.");
-  expect(bridge.commands[3]).toEqual({ cmd: "connect", repo: "lr-bicc/sales", mode: "new-branch", branch: "r.vasilev" });
+  expect(bridge.commands[3]).toEqual({ cmd: "connect", appId: APP_ID, repo: "lr-bicc/sales", mode: "new-branch", branch: "r.vasilev" });
 });
 
 const net = () => new BridgeError({ code: "network", message: "x" });
@@ -386,4 +391,48 @@ test("a failed unlink keeps the confirmation open with the error and can be repe
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
   await screen.findByText("No linked repository");
   expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "unlink", "status"]);
+});
+
+describe("the panel follows its tab", () => {
+  test("a tab update to another app reloads the status; a sheet change within the same app does not", async () => {
+    const linked = view(LINKED);
+    const other = linked.page === "app" ? { ...linked, app: { ...linked.app, id: OTHER_ID } } : linked;
+    const bridge = fakeBridge({ status: [linked, other, { page: "hub" }] });
+    render(<App bridge={bridge} />);
+    await screen.findByText("lr-bicc/sales");
+    const statuses = () => bridge.commands.filter((c) => c.cmd === "status").length;
+    expect(statuses()).toBe(1);
+    bridge.tabUrl(`${APP_URL}/sheet/abc/state/analysis`);
+    bridge.tabUrl(`${APP_URL}/sheet/def/state/edit`);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statuses()).toBe(1);
+    bridge.tabUrl(`https://qlik.example.com/sense/app/${OTHER_ID}/overview`);
+    await waitFor(() => expect(statuses()).toBe(2));
+    bridge.tabUrl(`https://qlik.example.com/sense/app/${OTHER_ID}/sheet/x`);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statuses()).toBe(2);
+    bridge.tabUrl("https://qlik.example.com/hub/my/work");
+    await waitFor(() => expect(statuses()).toBe(3));
+  });
+
+  test("an app-changed error reloads the status and says so", async () => {
+    const bridge = fakeBridge({
+      status: [view({ state: "unlinked" }), view({ state: "unlinked" })],
+      createRepository: [new BridgeError({ code: "app-changed", message: "x" })],
+    });
+    render(<App bridge={bridge} />);
+    fireEvent.click(await screen.findByText("Create repository"));
+    await screen.findByText("This tab now shows a different app. Qommit has refreshed.");
+    expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "createRepository", "status"]);
+    const alert = screen.getByRole("alert");
+    expect(within(alert).queryByRole("button")).toBeNull();
+  });
+
+  test("the hub view has a Refresh button that sends status", async () => {
+    const bridge = fakeBridge({ status: [{ page: "hub" }] });
+    render(<App bridge={bridge} />);
+    await screen.findByText("Open an app to use Qommit.");
+    fireEvent.click(screen.getByText("Refresh"));
+    await waitFor(() => expect(bridge.commands.filter((c) => c.cmd === "status")).toHaveLength(2));
+  });
 });

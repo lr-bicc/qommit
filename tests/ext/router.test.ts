@@ -76,7 +76,7 @@ const texts = (events: ProgressEvent[]) => events.map((e) => e.text);
 let warn: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { warn = vi.spyOn(console, "warn").mockImplementation(() => {}); });
 afterEach(() => { warn.mockRestore(); });
-const COMMIT: Command = { cmd: "commit", message: "m", paths: [], removeUnmaintained: false, allowBehind: false };
+const COMMIT: Command = { cmd: "commit", appId: APP_ID, message: "m", paths: [], removeUnmaintained: false, allowBehind: false };
 
 test("hub pages have no app", async () => {
   const { run } = setup({ url: "https://qlik.example.com/qs/hub" });
@@ -134,7 +134,7 @@ test("unlinked app: create repository, then the status is linked", async () => {
   const { run } = setup({ url: appPage(APP_ID) });
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("unlinked");
   expect(await run(COMMIT)).toMatchObject({ ok: false, error: { code: "not-linked" } });
-  expect(await run({ cmd: "createRepository" })).toMatchObject({ ok: true });
+  expect(await run({ cmd: "createRepository", appId: APP_ID })).toMatchObject({ ok: true });
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("linked");
 });
 
@@ -269,20 +269,20 @@ test("create branch for a duplicated app", async () => {
   link.link.appId = OTHER_ID;
   const view = (await run({ cmd: "status" })) as any;
   expect(view.value.status.state).toBe("duplicated");
-  const res = (await run({ cmd: "createBranch", name: "copy", fromSource: true })) as any;
+  const res = (await run({ cmd: "createBranch", appId: APP_ID, name: "copy", fromSource: true })) as any;
   expect(res).toMatchObject({ ok: true, value: { repo: REPO, branch: "copy", appId: APP_ID } });
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("linked");
 });
 
 test("create branch needs a copy or a missing branch", async () => {
   const { run } = setup({ linked: true });
-  expect(await run({ cmd: "createBranch", name: "x", fromSource: false })).toMatchObject({ ok: false, error: { code: "not-linked" } });
+  expect(await run({ cmd: "createBranch", appId: APP_ID, name: "x", fromSource: false })).toMatchObject({ ok: false, error: { code: "not-linked" } });
 });
 
 test("create branch after the linked branch disappeared", async () => {
   const { run, github } = setup({ linked: true, linkBranch: "dev" });
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("branch-missing");
-  const res = await run({ cmd: "createBranch", name: "dev2", fromSource: false });
+  const res = await run({ cmd: "createBranch", appId: APP_ID, name: "dev2", fromSource: false });
   expect(res).toMatchObject({ ok: true, value: { repo: REPO, branch: "dev2", appId: APP_ID } });
   expect(await github.getBranchSha(REPO, "dev2")).not.toBeNull();
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("linked");
@@ -291,10 +291,10 @@ test("create branch after the linked branch disappeared", async () => {
 test("connect and unlink", async () => {
   const { run, github, app } = setup();
   github.seed("lr-bicc/shared", new Map([["README.md", "# shared\n"]]));
-  const linked = await run({ cmd: "connect", repo: "lr-bicc/shared", mode: "new-branch", branch: "r.vasilev" });
+  const linked = await run({ cmd: "connect", appId: APP_ID, repo: "lr-bicc/shared", mode: "new-branch", branch: "r.vasilev" });
   expect(linked).toMatchObject({ ok: true, value: { repo: "lr-bicc/shared", branch: "r.vasilev", appId: APP_ID } });
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("linked");
-  expect(await run({ cmd: "unlink" })).toEqual({ ok: true, value: null });
+  expect(await run({ cmd: "unlink", appId: APP_ID })).toEqual({ ok: true, value: null });
   expect(app.objects.some((o) => o.props.qInfo.qId === "qommit-link")).toBe(false);
   expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("unlinked");
 });
@@ -325,7 +325,7 @@ test("a failed mutating command forgets the remembered status", async () => {
   const set = cache.set;
   cache.set = async () => { throw new Error("storage full"); };
   sessions.drop(); // the next session cannot write the link object
-  const failed = await run({ cmd: "createRepository" });
+  const failed = await run({ cmd: "createRepository", appId: APP_ID });
   expect(failed).toMatchObject({ ok: false, error: { code: "internal" } });
   cache.set = set; // storage works again; the app object still cannot be written
   // the repository exists now: the next command must see it, not the old "unlinked"
@@ -382,4 +382,23 @@ test("each failed command is logged once in the page console, with command, code
   expect(warn).toHaveBeenCalledWith("[qommit]", "localChanges", "no-app", "Open a Qlik Sense app to use this command");
   await run({ cmd: "ping" });
   expect(warn).toHaveBeenCalledTimes(1);
+});
+
+test("a mutating command for another app is app-changed: no session, nothing written", async () => {
+  const { run, sessions, github, app } = setup({ linked: true });
+  const head = github.head(REPO, "main");
+  app.dimensions.push({ qInfo: { qId: "d-new", qType: "dimension" }, qMetaDef: { title: "Region" } });
+  const res = await run({ ...COMMIT, appId: OTHER_ID, paths: ["objects/dimensions/d-new.json"] });
+  expect(res).toMatchObject({ ok: false, error: { code: "app-changed" } });
+  expect(sessions.opened).toBe(0);
+  expect(github.head(REPO, "main")).toBe(head);
+  for (const command of [
+    { cmd: "createRepository", appId: OTHER_ID }, { cmd: "unlink", appId: OTHER_ID },
+    { cmd: "connect", appId: OTHER_ID, repo: REPO, mode: "existing-branch", branch: "main" },
+    { cmd: "createBranch", appId: OTHER_ID, name: "x", fromSource: false },
+  ] as Command[]) {
+    expect(await run(command)).toMatchObject({ ok: false, error: { code: "app-changed" } });
+  }
+  expect(sessions.opened).toBe(0);
+  expect(await run({ ...COMMIT, appId: APP_ID.toUpperCase(), paths: ["objects/dimensions/d-new.json"] })).toMatchObject({ ok: true });
 });

@@ -58,6 +58,7 @@ export function toCommandError(e: unknown): CommandError {
     return error;
   }
   if (e instanceof NoAppError) return { code: "no-app", message: e.message };
+  if (e instanceof AppChangedError) return { code: "app-changed", message: e.message };
   if (isSessionLoss(e)) return { code: "qlik-session", message: messageOf(e) };
   if (e instanceof QlikReadError) return { code: "qlik-read", message: e.message };
   if (e instanceof QlikSessionError) return { code: "qlik-session", message: e.message };
@@ -66,6 +67,9 @@ export function toCommandError(e: unknown): CommandError {
 
 /** The current tab shows no Qlik app. */
 class NoAppError extends Error {}
+
+/** A command names another app than the one the tab shows now. */
+class AppChangedError extends Error {}
 
 const notLinked = (what: string): FlowError => new FlowError("not-linked", `${what} needs an app that is linked to a repository`);
 
@@ -108,6 +112,9 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
     }
     const appLoc = { ...loc, appId: loc.appId };
     const appId = appLoc.appId;
+    if ("appId" in command && command.appId.toLowerCase() !== appId.toLowerCase()) {
+      throw new AppChangedError("The tab now shows another app");
+    }
 
     if (command.cmd === "listRepos") return deps.github.listOrgRepos();
     if (command.cmd === "listBranches") {

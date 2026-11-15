@@ -47,7 +47,7 @@ export function UnlinkDialog(props: DialogProps & { repo: string }): JSX.Element
     if (props.isBusy()) return;
     setError(null);
     try {
-      await props.run({ cmd: "unlink" });
+      await props.run({ cmd: "unlink", appId: props.appId });
       props.onDone();
     } catch (e) {
       setError(toCommandError(e));

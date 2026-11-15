@@ -23,14 +23,14 @@ test("any other rejection is interrupted: no injection, no second send", async (
   chrome.respond = () => {
     throw new Error("The message port closed before a response was received.");
   };
-  await expect(createBridge(5).send({ cmd: "createRepository" })).rejects.toMatchObject({ error: { code: "interrupted" } });
+  await expect(createBridge(5).send({ cmd: "createRepository", appId: "a" })).rejects.toMatchObject({ error: { code: "interrupted" } });
   expect(chrome.injected).toEqual([]);
   expect(chrome.tabMessages).toHaveLength(1);
 });
 
 test("an undefined answer is interrupted: no injection, no second send", async () => {
   chrome.respond = () => undefined;
-  await expect(createBridge(5).send({ cmd: "commit", message: "m", paths: [], removeUnmaintained: false, allowBehind: false })).rejects.toMatchObject({ error: { code: "interrupted" } });
+  await expect(createBridge(5).send({ cmd: "commit", appId: "a", message: "m", paths: [], removeUnmaintained: false, allowBehind: false })).rejects.toMatchObject({ error: { code: "interrupted" } });
   expect(chrome.injected).toEqual([]);
   expect(chrome.tabMessages).toHaveLength(1);
 });
@@ -69,4 +69,16 @@ test("progress events of other tabs do not reach the listener", () => {
 test("openOptions opens the options page", () => {
   createBridge(5).openOptions();
   expect(chrome.optionsPageOpened).toBe(1);
+});
+
+test("URL changes of its own tab reach the tab URL listener; other tabs and other changes do not", () => {
+  const urls: string[] = [];
+  const stop = createBridge(5).onTabUrl((url) => urls.push(url));
+  chrome.emitTabUpdated(6, { url: "https://other/" });
+  chrome.emitTabUpdated(5, { status: "complete" });
+  chrome.emitTabUpdated(5, { url: "https://qlik/sense/app/x" });
+  expect(urls).toEqual(["https://qlik/sense/app/x"]);
+  stop();
+  chrome.emitTabUpdated(5, { url: "https://qlik/sense/app/y" });
+  expect(urls).toEqual(["https://qlik/sense/app/x"]);
 });

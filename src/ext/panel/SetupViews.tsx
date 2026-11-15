@@ -6,6 +6,7 @@ import { errorText } from "./errors";
 
 export interface SetupViewsProps {
   status: AppStatus & { state: "unlinked" | "duplicated" | "branch-missing" | "repo-missing" | "published" };
+  appId: string; // the app the panel shows
   busy: boolean;
   /** Runs a command and reloads the status; `onError` returns true when it handled the failure itself. */
   mutate(command: Command, onError?: (error: CommandError) => boolean): Promise<void>;
@@ -32,7 +33,10 @@ export function SetupViews(props: SetupViewsProps): JSX.Element | null {
     case "unlinked": {
       const create = (name?: string): void => {
         setTaken(null);
-        void props.mutate(name === undefined ? { cmd: "createRepository" } : { cmd: "createRepository", name }, (error) => {
+        const command: Command = name === undefined
+          ? { cmd: "createRepository", appId: props.appId }
+          : { cmd: "createRepository", appId: props.appId, name };
+        void props.mutate(command, (error) => {
           const found = nameTaken(error);
           if (found) setTaken(found);
           return found !== null;

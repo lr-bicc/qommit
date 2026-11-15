@@ -10,6 +10,8 @@ export class BridgeError extends Error {
 export interface Bridge {
   send<T>(command: Command): Promise<T>; // rejects with BridgeError
   onProgress(listener: (text: string) => void): () => void;
+  /** Called with the new URL whenever the panel's tab navigates. */
+  onTabUrl(listener: (url: string) => void): () => void;
   openOptions(): void;
 }
 
@@ -57,6 +59,14 @@ export function createBridge(tabId: number): Bridge {
       };
       chrome.runtime.onMessage.addListener(handler);
       return () => chrome.runtime.onMessage.removeListener(handler);
+    },
+
+    onTabUrl(listener) {
+      const handler = (id: number, changeInfo: { url?: string }): void => {
+        if (id === tabId && typeof changeInfo.url === "string") listener(changeInfo.url);
+      };
+      chrome.tabs.onUpdated.addListener(handler);
+      return () => chrome.tabs.onUpdated.removeListener(handler);
     },
 
     openOptions() {

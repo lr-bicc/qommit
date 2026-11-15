@@ -7,6 +7,7 @@ import { ErrorMessage } from "./ErrorMessage";
 
 export interface DialogProps {
   run<T>(command: Command): Promise<T>; // rejects with BridgeError
+  appId: string; // the app the panel shows; named by every command that changes something
   busy: boolean;
   isBusy(): boolean; // a command is in flight right now (not yet reflected in `busy`)
   onOptions(): void;
@@ -27,7 +28,7 @@ export function CreateBranchDialog(props: DialogProps & { suggestedBranch: strin
     if (props.isBusy()) return;
     setError(null);
     try {
-      await props.run({ cmd: "createBranch", name: name.trim(), fromSource: props.sourceBranch !== null && fromSource });
+      await props.run({ cmd: "createBranch", appId: props.appId, name: name.trim(), fromSource: props.sourceBranch !== null && fromSource });
       props.onDone();
     } catch (err) {
       setError(toCommandError(err));

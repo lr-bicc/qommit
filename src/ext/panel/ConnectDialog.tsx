@@ -48,7 +48,7 @@ export function ConnectDialog(props: DialogProps & { suggestedBranch: string }):
     if (repo === null || props.isBusy()) return;
     setError(null);
     try {
-      await props.run({ cmd: "connect", repo, mode, branch: mode === "new-branch" ? newName.trim() : existing });
+      await props.run({ cmd: "connect", appId: props.appId, repo, mode, branch: mode === "new-branch" ? newName.trim() : existing });
       props.onDone();
     } catch (err) {
       setError({ error: toCommandError(err), retry: () => void submit() });

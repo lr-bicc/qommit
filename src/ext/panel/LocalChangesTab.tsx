@@ -43,7 +43,7 @@ function DialogError(props: { error: CommandError; onOptions(): void }): JSX.Ele
   );
 }
 
-export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSaved(): void; reloadToken?: number }): JSX.Element {
+export function LocalChangesTab(props: { bridge: Bridge; appId: string; readOnly: boolean; onSaved(): void; reloadToken?: number }): JSX.Element {
   const { bridge, readOnly, reloadToken } = props;
   const [data, setData] = useState<LocalChanges | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -148,6 +148,7 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
 
   const commitCommand = (allowBehind: boolean): CommitCommand => ({
     cmd: "commit",
+    appId: props.appId,
     message: message.trim(),
     paths: items.filter((i) => selection.has(i.path)).map((i) => i.path),
     removeUnmaintained: removing,
