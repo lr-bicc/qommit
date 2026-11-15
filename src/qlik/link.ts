@@ -1,4 +1,5 @@
 import type { EngineApi } from "./engine-types";
+import { engineCall as call } from "./timeout";
 
 export interface LinkData { repo: string; branch: string; appId: string; syncedSha: string }
 export const LINK_ID = "qommit-link"; // qId and qType
@@ -16,7 +17,7 @@ const isNotFound = (e: unknown): boolean => {
 
 async function openOrNull(doc: EngineApi, id: string): Promise<EngineApi | null> {
   try {
-    return await doc.getObject(id);
+    return await call(doc.getObject(id));
   } catch (e) {
     if (isNotFound(e)) return null;
     throw e;
@@ -28,7 +29,7 @@ const isNonEmpty = (v: unknown): v is string => typeof v === "string" && v.lengt
 export async function readLink(doc: EngineApi): Promise<LinkData | null> {
   const handle = await openOrNull(doc, LINK_ID);
   if (!handle) return null;
-  const props = await handle.getProperties();
+  const props = await call(handle.getProperties());
   const l = props?.link;
   if (typeof l !== "object" || l === null) return null;
   const { repo, branch, appId, syncedSha } = l as Record<string, unknown>;
@@ -43,13 +44,13 @@ export async function writeLink(doc: EngineApi, link: LinkData): Promise<void> {
     link: { repo: link.repo, branch: link.branch, appId: link.appId, syncedSha: link.syncedSha },
   };
   const existing = await openOrNull(doc, LINK_ID);
-  if (existing) await existing.setProperties(props);
-  else await doc.createObject(props);
+  if (existing) await call(existing.setProperties(props));
+  else await call(doc.createObject(props));
 }
 
 export async function removeLink(doc: EngineApi): Promise<void> {
   try {
-    await doc.destroyObject(LINK_ID); // resolves false on the real engine when nothing was destroyed
+    await call(doc.destroyObject(LINK_ID)); // resolves false on the real engine when nothing was destroyed
   } catch (e) {
     if (!isNotFound(e)) throw e;
   }
@@ -70,7 +71,7 @@ function findRepo(node: unknown): string | null {
 export async function readGitoqlokMeta(doc: EngineApi): Promise<{ repo: string | null; lastCommitId: string | null } | null> {
   const handle = await openOrNull(doc, GITOQLOK_META_ID);
   if (!handle) return null;
-  const props = await handle.getProperties();
+  const props = await call(handle.getProperties());
   const data: unknown = props?._data;
   const last: unknown = (data as { infoByServerType?: { github?: { lastCommitId?: unknown } } } | undefined)
     ?.infoByServerType?.github?.lastCommitId;
@@ -78,6 +79,6 @@ export async function readGitoqlokMeta(doc: EngineApi): Promise<{ repo: string |
 }
 
 export async function readAppInfo(doc: EngineApi): Promise<{ title: string; published: boolean }> {
-  const layout = await doc.getAppLayout();
+  const layout = await call(doc.getAppLayout());
   return { title: String(layout?.qTitle ?? ""), published: layout?.published === true };
 }

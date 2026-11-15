@@ -27,6 +27,11 @@ describe("ContentFiles.list", () => {
     const files = createContentFiles(fakeDoc(app).doc, loc, APP_ID, vi.fn() as unknown as typeof fetch);
     await expect(files.list()).rejects.toBeInstanceOf(QlikReadError);
   });
+  test("a name that cannot be decoded is used as it is", async () => {
+    const app = { ...base(), libraryFiles: [`/appcontent/${APP_ID}/100%.png`, `/appcontent/${APP_ID}/a%20b.png`] };
+    const files = createContentFiles(fakeDoc(app).doc, loc, APP_ID, vi.fn() as unknown as typeof fetch);
+    expect(await files.list()).toEqual(["100%.png", "a b.png"]);
+  });
   test("an engine failure becomes QlikReadError", async () => {
     const fake = fakeDoc({ ...base(), libraryFiles: [`/appcontent/${APP_ID}/a.png`] });
     fake.failOn("getLibraryContent", "__appcontent");
@@ -65,6 +70,38 @@ describe("ContentFiles.download", () => {
     const f = vi.fn(async () => new Response("nope", { status: 404 }));
     const files = createContentFiles(fakeDoc(base()).doc, loc, APP_ID, f as unknown as typeof fetch);
     await expect(files.download("x.png")).rejects.toBeInstanceOf(QlikReadError);
+  });
+  test("a redirected answer is a sign-in page, not a file", async () => {
+    const res = new Response(new Uint8Array([1]), { status: 200 });
+    Object.defineProperty(res, "redirected", { value: true });
+    const files = createContentFiles(fakeDoc(base()).doc, loc, APP_ID, (async () => res) as unknown as typeof fetch);
+    const err = await files.download("x.png").catch((e) => e);
+    expect(err).toBeInstanceOf(QlikReadError);
+    expect(err.message).toMatch(/x\.png.*looks like a sign-in page/);
+  });
+  test("an HTML answer is a sign-in page, not a file", async () => {
+    const res = new Response("<html></html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+    const files = createContentFiles(fakeDoc(base()).doc, loc, APP_ID, (async () => res) as unknown as typeof fetch);
+    const err = await files.download("x.png").catch((e) => e);
+    expect(err).toBeInstanceOf(QlikReadError);
+    expect(err.message).toMatch(/looks like a sign-in page/);
+  });
+  test("a download that never answers fails after 60 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const files = createContentFiles(fakeDoc(base()).doc, loc, APP_ID, (() => new Promise<Response>(() => {})) as unknown as typeof fetch);
+      const outcome = files.download("x.png").catch((e) => e);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await outcome;
+      expect(err).toBeInstanceOf(QlikReadError);
+      expect(err.message).toMatch(/x\.png.*did not answer in time/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   test("a network failure throws QlikReadError", async () => {
     const f = vi.fn(async () => { throw new TypeError("net"); });

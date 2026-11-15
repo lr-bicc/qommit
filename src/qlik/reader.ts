@@ -1,6 +1,7 @@
 import type { AppSnapshot, GenericProps, PropertyTree } from "../core/types";
 import type { ContentFiles } from "./content-files";
 import type { EngineApi, NxInfo } from "./engine-types";
+import { engineCall as call } from "./timeout";
 
 export class QlikReadError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -50,18 +51,22 @@ async function runPool(tasks: (() => Promise<void>)[], limit = MAX_IN_FLIGHT): P
   if (failure) throw failure.error;
 }
 
-/** Creates a session object, reads its layout, and destroys it again, also when reading fails. */
-async function readSessionList<T>(doc: EngineApi, what: string, id: string, def: Record<string, unknown>, key: string): Promise<T> {
+/**
+ * Creates a session object, reads its layout, and destroys it again, also when reading fails. The engine
+ * assigns the id, so a second tab on the same app or a leftover of an interrupted read cannot collide.
+ */
+async function readSessionList<T>(doc: EngineApi, what: string, type: string, def: Record<string, unknown>, key: string): Promise<T> {
   return step(what, async () => {
-    const list = (await doc.createSessionObject({ qInfo: { qId: id, qType: id }, ...def })) as EngineApi;
+    const list = (await call(doc.createSessionObject({ qInfo: { qType: type }, ...def }))) as EngineApi & { id?: unknown };
+    const id = list.id;
     try {
-      const layout = (await list.getLayout()) as Record<string, unknown> | undefined;
+      const layout = (await call(list.getLayout())) as Record<string, unknown> | undefined;
       // An answer without the list itself is a failure, not an empty list: it would hide flags, approvals or objects.
       if (!layout || typeof layout[key] !== "object" || layout[key] === null) throw new Error(`the answer has no ${key}`);
       return layout as T;
     } finally {
       try {
-        await doc.destroySessionObject(id);
+        if (typeof id === "string") await call(doc.destroySessionObject(id));
       } catch {
         /* a session object does not outlive its session; the read result does not depend on it */
       }
@@ -81,7 +86,7 @@ export async function readApp(
   appId: string,
   opts: { published: boolean; files?: ContentFiles; onProgress?: (done: number, total: number) => void },
 ): Promise<AppSnapshot> {
-  const infos = (await step("object list", () => doc.getAllInfos())) as NxInfo[];
+  const infos = (await step("object list", () => call(doc.getAllInfos()))) as NxInfo[];
   const idsOf = (type: string) => infos.filter((i) => i.qType === type).map((i) => i.qId);
 
   // Phase 1: everything that decides what is read.
@@ -99,7 +104,7 @@ export async function readApp(
       variableList = layout.qVariableList?.qItems ?? [];
     },
     async () => {
-      script = (await step("script", () => doc.getScript())) as string;
+      script = (await step("script", () => call(doc.getScript()))) as string;
     },
   ];
   if (opts.files) {
@@ -153,10 +158,11 @@ export async function readApp(
     return out;
   };
   const tree = (id: string) => async () => {
-    const obj = (await doc.getObject(id)) as EngineApi;
-    return (await obj.getFullPropertyTree()) as PropertyTree;
+    const obj = (await call(doc.getObject(id))) as EngineApi;
+    return (await call(obj.getFullPropertyTree())) as PropertyTree;
   };
-  const props = (open: (id: string) => Promise<EngineApi>) => async (id: string) => ((await open(id)) as EngineApi).getProperties() as Promise<GenericProps>;
+  const props = (open: (id: string) => Promise<EngineApi>) => async (id: string) =>
+    call(((await call(open(id))) as EngineApi).getProperties() as Promise<GenericProps>);
 
   const appProps = collect("appprops", ids.appprops, (id) => tree(id)());
   const masterObjects = collect("masterobject", ids.masterobject, (id) => tree(id)());

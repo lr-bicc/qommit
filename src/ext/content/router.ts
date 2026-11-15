@@ -2,6 +2,7 @@ import type { QlikLocation } from "../../qlik/location";
 import { parseQlikUrl } from "../../qlik/location";
 import { QlikReadError } from "../../qlik/reader";
 import { QlikSessionError, type EngineSession } from "../../qlik/session";
+import { QlikTimeoutError } from "../../qlik/timeout";
 import { commitChanges } from "../flows/commit";
 import { computeLocalChanges } from "../flows/local-changes";
 import { FlowError, type AppPort, type FlowPorts, type LinkCache } from "../flows/ports";
@@ -25,7 +26,24 @@ export interface RouterDeps {
 
 const PROGRESS_INTERVAL_MS = 250;
 
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+const messageOf = (e: unknown): string => {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
+  return String(e);
+};
+
+/** enigma.js rejects every pending and later call with this code once the socket is gone. */
+const SOCKET_CLOSED_CODE = -1;
+
+/** A timeout or a closed socket, also when wrapped (e.g. as a read error): the session is lost. */
+function isSessionLoss(e: unknown): boolean {
+  for (let cause = e, depth = 0; cause !== undefined && cause !== null && depth < 5; depth++) {
+    if (cause instanceof QlikTimeoutError) return true;
+    if (typeof cause === "object" && (cause as { code?: unknown }).code === SOCKET_CLOSED_CODE) return true;
+    cause = typeof cause === "object" ? (cause as { cause?: unknown }).cause : undefined;
+  }
+  return false;
+}
 
 export function toCommandError(e: unknown): CommandError {
   if (e instanceof GatewayError) {
@@ -40,6 +58,7 @@ export function toCommandError(e: unknown): CommandError {
     return error;
   }
   if (e instanceof NoAppError) return { code: "no-app", message: e.message };
+  if (isSessionLoss(e)) return { code: "qlik-session", message: messageOf(e) };
   if (e instanceof QlikReadError) return { code: "qlik-read", message: e.message };
   if (e instanceof QlikSessionError) return { code: "qlik-session", message: e.message };
   return { code: "internal", message: messageOf(e) };
@@ -193,6 +212,7 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
     } catch (e) {
       const error = toCommandError(e);
       if (error.code === "qlik-read" || error.code === "qlik-session") dropSession();
+      console.warn("[qommit]", command.cmd, error.code, error.message);
       return { ok: false, error };
     } finally {
       emit({ event: "progress", text: "Ready" });

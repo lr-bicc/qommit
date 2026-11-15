@@ -6,6 +6,7 @@ import { GatewayError } from "../../src/ext/shared/github-port";
 import { suggestBranchName } from "../../src/ext/flows/setup";
 import { QlikReadError } from "../../src/qlik/reader";
 import { QlikSessionError, type EngineSession } from "../../src/qlik/session";
+import { QlikTimeoutError } from "../../src/qlik/timeout";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
 import { appFromSnapshot, fakeDoc } from "../qlik/fake-engine";
 import { fakeCache, fakeGitHub } from "./fake-ports";
@@ -26,7 +27,11 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
     const sha = github.seed(REPO, files);
     app.objects.push({ props: { qInfo: { qId: "qommit-link", qType: "qommit-link" }, link: { repo: REPO, branch: init.linkBranch ?? "main", appId: APP_ID, syncedSha: sha } } });
   }
-  const sessions = { opened: 0, closed: 0, reads: 0, maxReads: 0, failNext: false, hangClose: false, failLinkWrite: false, drop: () => {}, openError: null as Error | null };
+  const sessions = {
+    opened: 0, closed: 0, reads: 0, maxReads: 0, failNext: false, hangClose: false, failLinkWrite: false, drop: () => {}, openError: null as Error | null,
+    /** Engine methods replaced in the next opened sessions. */
+    patch: {} as Record<string, (...args: unknown[]) => Promise<unknown>>,
+  };
   const events: ProgressEvent[] = [];
   let clock = 0;
   const router = createRouter({
@@ -44,6 +49,7 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
           sessions.maxReads = Math.max(sessions.maxReads, sessions.reads);
           try { return await fake.doc.getAllInfos(); } finally { sessions.reads--; }
         },
+        ...sessions.patch,
       };
       let closed = false;
       sessions.drop = () => { closed = true; };
@@ -66,6 +72,10 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
   };
 }
 const texts = (events: ProgressEvent[]) => events.map((e) => e.text);
+
+let warn: ReturnType<typeof vi.spyOn>;
+beforeEach(() => { warn = vi.spyOn(console, "warn").mockImplementation(() => {}); });
+afterEach(() => { warn.mockRestore(); });
 const COMMIT: Command = { cmd: "commit", message: "m", paths: [], removeUnmaintained: false, allowBehind: false };
 
 test("hub pages have no app", async () => {
@@ -335,4 +345,41 @@ test("commit uses a fresh status, so a link changed elsewhere is honoured", asyn
   expect(res.ok).toBe(true);
   expect(github.head(REPO, "dev")).toBe(res.value.sha);
   expect(github.head(REPO, "main")).toBe(main);
+});
+
+test("a Qlik timeout anywhere in a command is qlik-session and drops the session", async () => {
+  const { run, sessions } = setup({ linked: true });
+  sessions.patch = { getAppLayout: () => Promise.reject(new QlikTimeoutError("Qlik did not answer in time.")) };
+  expect(await run({ cmd: "status" })).toEqual({ ok: false, error: { code: "qlik-session", message: "Qlik did not answer in time." } });
+  expect(sessions.closed).toBe(1);
+  sessions.patch = {};
+  expect(await run({ cmd: "status" })).toMatchObject({ ok: true });
+  expect(sessions.opened).toBe(2);
+});
+
+test("a timeout inside the read (wrapped as a read error) is qlik-session too", async () => {
+  const { run, sessions } = setup({ linked: true });
+  sessions.patch = { getScript: () => Promise.reject(new QlikTimeoutError("Qlik did not answer in time.")) };
+  const res = await run({ cmd: "localChanges" });
+  expect(res).toMatchObject({ ok: false, error: { code: "qlik-session" } });
+  expect(sessions.closed).toBe(1);
+});
+
+test("enigma's 'Socket closed' (code -1) is qlik-session and drops the session, read or not", async () => {
+  const { run, sessions } = setup({ linked: true });
+  sessions.patch = { getScript: () => Promise.reject({ code: -1, message: "Socket closed" }) };
+  expect(await run({ cmd: "localChanges" })).toMatchObject({ ok: false, error: { code: "qlik-session" } });
+  expect(sessions.closed).toBe(1);
+  sessions.patch = { getObject: () => Promise.reject({ code: -1, message: "Socket closed" }) };
+  expect(await run({ cmd: "status" })).toEqual({ ok: false, error: { code: "qlik-session", message: "Socket closed" } });
+  expect(sessions.closed).toBe(2);
+});
+
+test("each failed command is logged once in the page console, with command, code and message only", async () => {
+  const { run } = setup({ url: "https://qlik.example.com/qs/hub" });
+  await run({ cmd: "localChanges" });
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn).toHaveBeenCalledWith("[qommit]", "localChanges", "no-app", "Open a Qlik Sense app to use this command");
+  await run({ cmd: "ping" });
+  expect(warn).toHaveBeenCalledTimes(1);
 });

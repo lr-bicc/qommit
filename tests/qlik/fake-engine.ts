@@ -18,28 +18,35 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 /**
  * Engine test double. Every answer arrives after a `setTimeout(0)`; answers are deep copies (the real
  * engine serialises). `calls` holds `"<method> <id>"` entries, with `-` as id for document-level calls
- * without one. An unknown object rejects. `failOn(method, id)` makes that one call reject.
+ * without one. An unknown object rejects. `failOn(method, id)` makes that one call reject; `hangOn(method, id)`
+ * makes it never settle. Like the engine, session objects created without `qInfo.qId` get an id assigned
+ * (`<qType>#<n>`, returned as the handle's `id`); a session object whose qId already exists is refused. For
+ * calls on a session object, `failOn`/`hangOn` also match its qType in place of the id.
  */
 export function fakeDoc(app: FakeApp): {
-  doc: FakeDoc; calls: string[]; maxInFlight(): number; failOn(method: string, id: string): void;
+  doc: FakeDoc; calls: string[]; maxInFlight(): number; failOn(method: string, id: string): void; hangOn(method: string, id: string): void;
   /** The definitions passed to createSessionObject, in call order. */
   sessionDefs: Record<string, unknown>[];
 } {
   const calls: string[] = [];
   const sessionDefs: Record<string, unknown>[] = [];
   const failing = new Set<string>();
+  const hanging = new Set<string>();
   const sessions = new Set<string>();
+  let assigned = 0;
   let inFlight = 0;
   let peak = 0;
 
-  async function call<T>(method: string, id: string | undefined, answer: () => T): Promise<T> {
+  async function call<T>(method: string, id: string | undefined, answer: () => T, alias?: string): Promise<T> {
     const key = `${method} ${id ?? "-"}`;
+    const aliasKey = alias === undefined ? key : `${method} ${alias}`;
     calls.push(key);
+    if (hanging.has(key) || hanging.has(aliasKey)) return new Promise<T>(() => {});
     inFlight++;
     peak = Math.max(peak, inFlight);
     try {
       await tick();
-      if (failing.has(key)) throw { code: 15, message: `forced failure: ${key}` };
+      if (failing.has(key) || failing.has(aliasKey)) throw { code: 15, message: `forced failure: ${key}` };
       return answer();
     } finally {
       inFlight--;
@@ -129,19 +136,22 @@ export function fakeDoc(app: FakeApp): {
     getMeasure: opener("getMeasure", "measure", (id) => app.measures.some((p) => idOf(p) === id)),
     getBookmark: opener("getBookmark", "bookmark", (id) => app.bookmarks.some((b) => idOf(b.props) === id)),
     getVariableById: opener("getVariableById", "variable", (id) => app.variables.some((v) => idOf(v.props) === id)),
-    createSessionObject: (props: Record<string, unknown> & { qInfo: { qId: string } }) => {
-      const id = props.qInfo.qId;
-      return call("createSessionObject", id, () => {
+    createSessionObject: (props: Record<string, unknown> & { qInfo: { qId?: string; qType: string } }) => {
+      const type = props.qInfo.qType;
+      const id = props.qInfo.qId ?? `${type}#${++assigned}`;
+      return call("createSessionObject", props.qInfo.qId ?? type, () => {
+        if (sessions.has(id)) throw { code: 11, message: `object already exists: ${id}` };
         sessions.add(id);
         const def = clone(props);
         sessionDefs.push(def);
         return {
+          id,
           getLayout: () => call("getLayout", id, () => {
             if (!sessions.has(id)) throw unknown("session object", id);
             return layoutOf(def);
-          }),
-        } as EngineApi;
-      });
+          }, type),
+        } as unknown as EngineApi;
+      }, type);
     },
     destroySessionObject: (id: string) => call("destroySessionObject", id, () => sessions.delete(id)),
     getScript: () => call("getScript", undefined, () => app.script),
@@ -166,7 +176,11 @@ export function fakeDoc(app: FakeApp): {
     }),
   };
 
-  return { doc, calls, sessionDefs, maxInFlight: () => peak, failOn: (method, id) => { failing.add(`${method} ${id}`); } };
+  return {
+    doc, calls, sessionDefs, maxInFlight: () => peak,
+    failOn: (method, id) => { failing.add(`${method} ${id}`); },
+    hangOn: (method, id) => { hanging.add(`${method} ${id}`); },
+  };
 }
 
 const encodePath = (name: string) => name.split("/").map(encodeURIComponent).join("/");

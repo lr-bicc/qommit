@@ -1,5 +1,6 @@
 import { serializeApp } from "../../src/core/serializer";
 import { QlikReadError, readApp } from "../../src/qlik/reader";
+import { QlikTimeoutError } from "../../src/qlik/timeout";
 import { APP_ID, CANON_ID, makeSnapshot } from "../fixtures/snapshot";
 import { appFromSnapshot, fakeDoc } from "./fake-engine";
 import type { FakeApp } from "./fake-engine";
@@ -121,12 +122,23 @@ describe("reading rules", () => {
     expect(snap.stories.map((s) => s.qProperty.qInfo.qId)).toEqual(["st-pub"]);
     expect(snap.masterObjects).toHaveLength(1);
   });
-  test("session objects use qommit- ids", async () => {
+  test("session objects get no fixed id and are destroyed by the id the engine assigned", async () => {
     const fake = fakeDoc(appFromSnapshot(makeSnapshot(), { published: true }));
     await readApp(fake.doc, APP_ID, { published: true });
-    const created = fake.calls.filter((c) => c.startsWith("createSessionObject"));
-    expect(created.length).toBe(4);
-    for (const c of created) expect(c.split(" ")[1]).toMatch(/^qommit-/);
+    expect(fake.sessionDefs).toHaveLength(4);
+    for (const def of fake.sessionDefs) {
+      expect((def.qInfo as { qId?: string }).qId).toBeUndefined();
+      expect((def.qInfo as { qType: string }).qType).toMatch(/^qommit-/);
+    }
+    const destroyed = fake.calls.filter((c) => c.startsWith("destroySessionObject")).map((c) => c.split(" ")[1]).sort();
+    const assigned = fake.calls.filter((c) => c.startsWith("getLayout")).map((c) => c.split(" ")[1]).sort();
+    expect(destroyed).toEqual(assigned);
+    expect(destroyed.every((id) => /#\d+$/.test(id!))).toBe(true);
+  });
+  test("two reads of the same app at once do not collide", async () => {
+    const fake = fakeDoc(appFromSnapshot(makeSnapshot(), { published: true }));
+    const [a, b] = await Promise.all([readApp(fake.doc, APP_ID, { published: true }), readApp(fake.doc, APP_ID, { published: true })]);
+    expect(a.sheets).toEqual(b.sheets);
   });
   test("session objects are destroyed after a failed read too", async () => {
     const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
@@ -168,6 +180,31 @@ describe("failures", () => {
   });
 });
 
+describe("timeouts", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  test.each([
+    ["getProperties", "mes-1", /^Could not read measure mes-1: Qlik did not answer in time\.$/],
+    ["getAllInfos", "-", /^Could not read object list: Qlik did not answer in time\.$/],
+    ["getLayout", "qommit-variable-list", /^Could not read variable list: Qlik did not answer in time\.$/],
+  ])("an engine call (%s %s) that never answers fails the read after 30 seconds", async (method, id, message) => {
+    const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
+    fake.hangOn(method, id);
+    const outcome = readApp(fake.doc, APP_ID, { published: false }).catch((e) => e);
+    let settled = false;
+    void outcome.then(() => { settled = true; });
+    // The fake engine answers each call after a zero-delay timer, so the hanging call starts a few milliseconds in.
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const err = await outcome;
+    expect(err).toBeInstanceOf(QlikReadError);
+    expect(err.message).toMatch(message);
+    expect(err.cause).toBeInstanceOf(QlikTimeoutError);
+  });
+});
+
 describe("onProgress", () => {
   test("counts up to the number of objects, the last call has done === total", async () => {
     const calls: [number, number][] = [];
@@ -186,7 +223,7 @@ describe("list answers", () => {
     const { doc } = fakeDoc(appFromSnapshot(makeSnapshot(), { published: true }));
     return {
       ...doc,
-      createSessionObject: async (props: { qInfo: { qId: string } }) => {
+      createSessionObject: async (props: { qInfo: { qType: string } }) => {
         const inner = (await doc.createSessionObject!(props)) as { getLayout(): Promise<unknown> };
         return { getLayout: () => inner.getLayout().then((real) => (layout === "real" ? real : layout)) };
       },
@@ -194,8 +231,8 @@ describe("list answers", () => {
   };
   test.each([["variable list"], ["sheet list"], ["bookmark list"]])("a layout without the list fails the read (%s)", async (name) => {
     const doc = withLayout({});
-    const broken = { ...doc, createSessionObject: (p: { qInfo: { qId: string } }) =>
-      p.qInfo.qId === `qommit-${name.replace(" ", "-")}` ? doc.createSessionObject(p) : fakeDoc(appFromSnapshot(makeSnapshot(), { published: true })).doc.createSessionObject!(p) };
+    const broken = { ...doc, createSessionObject: (p: { qInfo: { qType: string } }) =>
+      p.qInfo.qType === `qommit-${name.replace(" ", "-")}` ? doc.createSessionObject(p) : fakeDoc(appFromSnapshot(makeSnapshot(), { published: true })).doc.createSessionObject!(p) };
     const err = await readApp(broken, APP_ID, { published: true }).catch((e) => e);
     expect(err).toBeInstanceOf(QlikReadError);
     expect(err.message).toMatch(new RegExp(`Could not read ${name}: the answer has no q(Variable|AppObject|Bookmark)List`));
@@ -221,7 +258,7 @@ describe("the variable list definition", () => {
     ];
     const { doc } = fakeDoc(app);
     const items = async (def: object) => {
-      const list = await doc.createSessionObject({ qInfo: { qId: "qommit-x", qType: "x" }, qVariableListDef: def });
+      const list = await doc.createSessionObject({ qInfo: { qType: "x" }, qVariableListDef: def });
       return (await list.getLayout()).qVariableList.qItems.map((i: { qInfo: { qId: string } }) => i.qInfo.qId);
     };
     expect(await items({ qType: "variable", qShowReserved: true, qData: {} })).toEqual(["a", "r"]);

@@ -23,6 +23,20 @@ describe("fetchCsrfToken", () => {
   test("returns null when fetch rejects", async () => {
     expect(await fetchCsrfToken(loc, fakeFetch(new TypeError("net")))).toBeNull();
   });
+  test("returns null when the token endpoint does not answer within 10 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const p = fetchCsrfToken(loc, (() => new Promise<Response>(() => {})) as unknown as typeof fetch);
+      let result: string | null | undefined;
+      void p.then((r) => { result = r; });
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 interface FakeOpts {
@@ -102,5 +116,41 @@ describe("openSession", () => {
     const p = openSession(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create });
     await expect(p).rejects.toBeInstanceOf(QlikSessionError);
     await expect(p).rejects.toThrow("socket refused");
+  });
+
+  describe("timeouts and sign-in", () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    test.each([
+      ["the socket", { open: () => new Promise<EngineApi>(() => {}) }],
+      ["the document", { openDoc: () => new Promise<EngineApi>(() => {}) }],
+    ])("%s not answering within 20 seconds is a QlikSessionError and closes the session", async (_what, opts) => {
+      const m = makeCreate(opts);
+      const outcome = openSession(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create }).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(m.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await outcome;
+      expect(err).toBeInstanceOf(QlikSessionError);
+      expect(err.message).toBe("Qlik did not answer in time.");
+      expect(m.close).toHaveBeenCalled();
+    });
+
+    test("mustAuthenticate rejects with 'Not signed in to Qlik.' and closes the session", async () => {
+      const m = makeCreate({ auth: { mustAuthenticate: true, loginUri: "https://host/login" }, openDoc: () => new Promise<EngineApi>(() => {}) });
+      const err = await openSession(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create }).catch((e) => e);
+      expect(err).toBeInstanceOf(QlikSessionError);
+      expect(err.message).toBe("Not signed in to Qlik.");
+      expect(m.close).toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    test("a signed-in session clears its timer", async () => {
+      const m = makeCreate({ auth: { userId: "r.vasilev", mustAuthenticate: false } });
+      const s = await openSession(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create });
+      expect(s.user).toBe("r.vasilev");
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });

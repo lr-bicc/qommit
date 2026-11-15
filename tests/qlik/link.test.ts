@@ -1,5 +1,6 @@
 import { GITOQLOK_META_ID, LINK_ID, readAppInfo, readGitoqlokMeta, readLink, removeLink, writeLink } from "../../src/qlik/link";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
+import { QlikTimeoutError } from "../../src/qlik/timeout";
 import { appFromSnapshot, fakeDoc } from "./fake-engine";
 
 const LINK = { repo: "lr-bicc/app", branch: "dev", appId: APP_ID, syncedSha: "abc" };
@@ -97,5 +98,29 @@ describe("missing object detection", () => {
     await expect(readLink(withGetObject(denied).fake.doc)).rejects.toBe(denied);
     await expect(readGitoqlokMeta(withGetObject(denied).fake.doc)).rejects.toBe(denied);
     await expect(writeLink(withGetObject(denied).fake.doc, LINK)).rejects.toBe(denied);
+  });
+});
+
+describe("timeouts", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  test.each([
+    ["readLink", "getObject", LINK_ID, (doc: Parameters<typeof readLink>[0]) => readLink(doc)],
+    ["writeLink", "getObject", LINK_ID, (doc: Parameters<typeof readLink>[0]) => writeLink(doc, LINK)],
+    ["removeLink", "destroyObject", LINK_ID, (doc: Parameters<typeof readLink>[0]) => removeLink(doc)],
+    ["readAppInfo", "getAppLayout", "-", (doc: Parameters<typeof readLink>[0]) => readAppInfo(doc)],
+    ["readGitoqlokMeta", "getObject", GITOQLOK_META_ID, (doc: Parameters<typeof readLink>[0]) => readGitoqlokMeta(doc)],
+  ])("%s: an engine call that never answers rejects with QlikTimeoutError after 30 seconds", async (_name, method, id, run) => {
+    const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
+    fake.hangOn(method, id);
+    const outcome = (run(fake.doc) as Promise<unknown>).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(29_999);
+    let settled = false;
+    void outcome.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await outcome).toBeInstanceOf(QlikTimeoutError);
   });
 });
