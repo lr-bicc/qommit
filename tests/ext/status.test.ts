@@ -115,6 +115,11 @@ describe("resolveStatus", () => {
     expect(await resolveStatus(ports)).toEqual({ state: "repo-missing", repo: "other-org/x" });
   });
 
+  it("gitoqlok metadata naming a repository outside the organisation is ignored", async () => {
+    const { ports } = setup({ meta: { repo: "other-org/x", lastCommitId: null } }, { readmeApp: CANON_ID });
+    expect(await resolveStatus(ports)).toEqual({ state: "unlinked" });
+  });
+
   it("link to lr-bicc/gone -> repo-missing", async () => {
     const { ports, app } = setup();
     app.link = { repo: "lr-bicc/gone", branch: "main", appId: APP_ID, syncedSha: "a".repeat(40) };

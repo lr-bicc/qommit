@@ -75,7 +75,8 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
 
   // No link anywhere: look for the app in the repositories.
   const meta = await app.readGitoqlokMeta();
-  const metaRepo = meta?.repo ? await github.getRepo(meta.repo) : null;
+  // Metadata naming a repository outside the organisation is ignored, like one that does not exist.
+  const metaRepo = meta?.repo ? await linkedRepo(github, meta.repo) : null;
   let hit: { repo: string; branch: string } | null = null;
   if (metaRepo) {
     const readme = await github.readTextFile(metaRepo.repo, metaRepo.defaultBranch, "README.md");
