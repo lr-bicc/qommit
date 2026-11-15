@@ -15,7 +15,7 @@ In der Qlik-App wird nichts verändert außer einem versteckten Objekt (Typ `qom
 
 ## 1. Einrichten
 
-- [ ] `npm run build:ext` ausführen, in Chrome `chrome://extensions` öffnen, „Entwicklermodus" einschalten, „Entpackte Erweiterung laden" und den Ordner `dist/ext` wählen. Erwartet: Qommit erscheint ohne Fehlermeldung in der Liste.
+- [ ] `qommit-extension.zip` entpacken (oder im Repo `npm run build:ext` ausführen; das Ergebnis liegt dann in `dist/ext`). In Chrome `chrome://extensions` öffnen, „Entwicklermodus" einschalten, „Entpackte Erweiterung laden" und den entpackten Ordner `qommit-extension` wählen. Erwartet: Qommit erscheint ohne Fehlermeldung in der Liste. Die Spike-Extension vorher entfernen.
 - [ ] Optionen der Extension öffnen, deinen GitHub-Token eintragen und speichern. Erwartet: Der Token wird gespeichert, das Feld zeigt ihn nicht im Klartext.
 - [ ] „Check connection" klicken. Erwartet: Erfolgsmeldung mit deinem GitHub-Benutzernamen.
 - [ ] Server `https://lr-analytics-test.lrworld.com` hinzufügen. Erwartet: Chrome fragt nach der Berechtigung für diese Seite, nach Zustimmung steht der Server in der Liste.
@@ -36,7 +36,7 @@ Die Zahlen gelten für eine frische Kopie der veröffentlichten „Supply Chain 
 
 ## 4. Save changes mit allen Einträgen
 
-- [ ] Alle Einträge ausgewählt lassen, Commit-Nachricht eingeben, „Save changes" klicken. Erwartet: Ein neuer Commit liegt auf dem Branch, und das Panel zeigt „No local changes".
+- [ ] „Save changes" klicken, alle Einträge ausgewählt lassen, eine Commit-Nachricht eingeben und „Save" klicken. Erwartet: Ein neuer Commit liegt auf dem Branch, und das Panel zeigt „No local changes".
 - [ ] Bei einer frischen Kopie wird kein Dialog „The branch has moved on" erwartet. Erscheint er trotzdem, notiere, welche Commits er auflistet (Wortlaut der Zeilen), und mache ein Bildschirmfoto.
 - [ ] Seite neu laden, danach die Daten der App neu laden (Skript ausführen). Erwartet: Weiterhin „No local changes" (Erfolgskriterium 3).
 
@@ -49,17 +49,18 @@ Die Zahlen gelten für eine frische Kopie der veröffentlichten „Supply Chain 
 
 - [ ] Eine kleine App ohne Repository öffnen. Erwartet: Das Panel bietet „Create repository" an.
 - [ ] „Create repository" klicken. Erwartet auf GitHub: Das neue Repository ist privat und hat eine `README.md` mit Branch-Tabelle. Das Panel zeigt die App als verknüpft und danach „No local changes".
-- [ ] Zweiter Durchlauf mit einer App in realer Größe (mehrere hundert Objekte, z. B. eine weitere Kopie von „Supply Chain Performance", vorher mit „Unlink repository" gelöst, oder eine andere große App ohne Repository): „Create repository" klicken. Erwartet: Auf GitHub genau ein Commit „Initial commit" mit allen Dateien, keine Meldung zum GitHub-Rate-Limit, danach „No local changes". Notiere die Dauer vom Klick bis „No local changes" (Sekunden).
+- [ ] Zweiter Durchlauf mit einer App in realer Größe (mehrere hundert Objekte, z. B. eine weitere Kopie von „Supply Chain Performance", vorher mit „Unlink repository" gelöst, oder eine andere große App ohne Repository): „Create repository" klicken. Erwartet: Auf GitHub genau ein Commit „Initial commit" mit allen Dateien, keine Meldung zum GitHub-Rate-Limit, danach „No local changes". Notiere die Dauer vom Klick bis „No local changes" (Sekunden). Meldet das Panel, dass es schon ein Repository mit dem Namen gibt, „Create as …" wählen. Das Test-Repository kannst du danach auf GitHub löschen.
 
 ## 7. Sonderfälle
 
 - [ ] Die veröffentlichte „Supply Chain Performance" öffnen. Erwartet: Das Panel zeigt den Hinweis „Published app – read only. Duplicate the app to make changes.", im Kopf das Repository (und, wenn bekannt, den Branch), keine Schaltflächen „Save changes" oder „Unlink repository", und in der App wird nichts geschrieben. Ist der Commit bekannt, aus dem die App veröffentlicht wurde, steht darunter „Published from commit" mit den ersten 7 Zeichen des Commits (Link auf GitHub) und die Liste der lokalen Änderungen ohne Speichern.
 - [ ] Hinweis: Eine veröffentlichte App ohne Repository zeigt „No linked repository" mit „Create repository" und „Connect to existing repository". Ein Klick darauf schreibt nichts und antwortet mit „Published apps are read only. Duplicate the app to make changes." – das ist erwartet.
-- [ ] Eine frisch veröffentlichte App: Die in Abschnitt 4 gespeicherte Kopie mit „Publish and replace" über die veröffentlichte App veröffentlichen (oder eine eigene Testkopie in einen Test-Stream veröffentlichen) und die veröffentlichte App öffnen. Erwartet: der Hinweis „Published app – read only. Duplicate the app to make changes.", die Zeile „Published from commit" mit den ersten 7 Zeichen des zuletzt gespeicherten Commits und „No local changes".
+- [ ] Eine frisch veröffentlichte App: Die in Abschnitt 4 gespeicherte Kopie in einen Test-Stream veröffentlichen, wie beim Spike („Test (Qommit)"), **nicht** über die echte „Supply Chain Performance" legen. Die veröffentlichte Test-App öffnen. Erwartet: der Hinweis „Published app – read only. Duplicate the app to make changes.", die Zeile „Published from commit" mit den ersten 7 Zeichen des zuletzt gespeicherten Commits und „No local changes".
 - [ ] Den Token in den Optionen entfernen und das Panel aktualisieren. Erwartet: Ein Hinweis zum fehlenden Token mit der Schaltfläche „Open options". Token danach wieder eintragen.
 - [ ] In Qlik abmelden (zweiter Tab) und im Panel „Refresh" klicken. Erwartet: Ein Hinweis zur Qlik-Sitzung, kein Absturz. Danach wieder anmelden.
 - [ ] „Unlink repository" wählen. Erwartet: Das Panel zeigt „No linked repository", und das bleibt auch nach „Refresh" so.
-- [ ] Eine zweite, unabhängige kleine App öffnen und sie mit „To existing branch" an ein vorhandenes Repository und dessen Branch hängen. Erwartet: Die App ist verknüpft, und die Branch-Tabelle des Repositories hat eine neue Zeile für diese App.
+- [ ] Eine zweite, unabhängige kleine App öffnen und sie mit „Connect to existing repository" → „To existing branch" an den Branch `main` des Repositories aus Abschnitt 6 hängen. Erwartet: Die App ist verknüpft; Local Changes zeigt die Unterschiede zwischen den beiden Apps; die Zeile von `main` in der Branch-Tabelle bleibt unverändert (sie nennt weiter die erste App). Nichts speichern, danach „Unlink repository".
+- [ ] Dieselbe App mit „As a new branch" an dasselbe Repository hängen. Erwartet: neuer Branch auf GitHub, neue Zeile in der Branch-Tabelle. Danach „Unlink repository".
 
 ## 8. Rückmeldung
 
