@@ -32,10 +32,12 @@ Die Zahlen gelten für eine frische Kopie der veröffentlichten „Supply Chain 
 - [ ] Tab „Local Changes" öffnen und den Ladefortschritt abwarten. Erwartet (laut Spike): 11 geänderte Sheets, 2 geänderte Dimensionen, 357 gelöschte Variablen, sonst nichts.
 - [ ] „Remove files no longer maintained" ansehen. Erwartet: Die Option nennt 5 Dateien: `loadScript.qvs`, `objects/fields.json`, `objects/themes.json`, `objects/glossarylinks.json` und `builds/<id>.qvf`.
 - [ ] Weicht eine Zahl ab, notiere sie und mache ein Bildschirmfoto.
+- [ ] Nach dem Speichern in Abschnitt 4: Die beiden geänderten Dimensionen auf GitHub öffnen (Commit ansehen, Datei unter `objects/dimensions/`). Erwartet: Der Unterschied zum vorigen Stand ist nur, dass `qMeta` innerhalb von `_ColorMapModel` weggefallen ist. Jede andere Abweichung notieren.
 
 ## 4. Save changes mit allen Einträgen
 
 - [ ] Alle Einträge ausgewählt lassen, Commit-Nachricht eingeben, „Save changes" klicken. Erwartet: Ein neuer Commit liegt auf dem Branch, und das Panel zeigt „No local changes".
+- [ ] Bei einer frischen Kopie wird kein Dialog „The branch has moved on" erwartet. Erscheint er trotzdem, notiere, welche Commits er auflistet (Wortlaut der Zeilen), und mache ein Bildschirmfoto.
 - [ ] Seite neu laden, danach die Daten der App neu laden (Skript ausführen). Erwartet: Weiterhin „No local changes" (Erfolgskriterium 3).
 
 ## 5. Änderung in der App
@@ -47,10 +49,13 @@ Die Zahlen gelten für eine frische Kopie der veröffentlichten „Supply Chain 
 
 - [ ] Eine kleine App ohne Repository öffnen. Erwartet: Das Panel bietet „Create repository" an.
 - [ ] „Create repository" klicken. Erwartet auf GitHub: Das neue Repository ist privat und hat eine `README.md` mit Branch-Tabelle. Das Panel zeigt die App als verknüpft und danach „No local changes".
+- [ ] Zweiter Durchlauf mit einer App in realer Größe (mehrere hundert Objekte, z. B. eine weitere Kopie von „Supply Chain Performance", vorher mit „Unlink repository" gelöst, oder eine andere große App ohne Repository): „Create repository" klicken. Erwartet: Auf GitHub genau ein Commit „Initial commit" mit allen Dateien, keine Meldung zum GitHub-Rate-Limit, danach „No local changes". Notiere die Dauer vom Klick bis „No local changes" (Sekunden).
 
 ## 7. Sonderfälle
 
-- [ ] Eine veröffentlichte App öffnen. Erwartet: Das Panel zeigt Informationen (nur lesen), bietet kein Speichern oder Verknüpfen an, und in der App wird nichts geschrieben.
+- [ ] Die veröffentlichte „Supply Chain Performance" öffnen. Erwartet: Das Panel zeigt den Hinweis „Published app – read only. Duplicate the app to make changes.", im Kopf das Repository (und, wenn bekannt, den Branch), keine Schaltflächen „Save changes" oder „Unlink repository", und in der App wird nichts geschrieben. Ist der Commit bekannt, aus dem die App veröffentlicht wurde, steht darunter „Published from commit" mit den ersten 7 Zeichen des Commits (Link auf GitHub) und die Liste der lokalen Änderungen ohne Speichern.
+- [ ] Hinweis: Eine veröffentlichte App ohne Repository zeigt „No linked repository" mit „Create repository" und „Connect to existing repository". Ein Klick darauf schreibt nichts und antwortet mit „Published apps are read only. Duplicate the app to make changes." – das ist erwartet.
+- [ ] Eine frisch veröffentlichte App: Die in Abschnitt 4 gespeicherte Kopie mit „Publish and replace" über die veröffentlichte App veröffentlichen (oder eine eigene Testkopie in einen Test-Stream veröffentlichen) und die veröffentlichte App öffnen. Erwartet: der Hinweis „Published app – read only. Duplicate the app to make changes.", die Zeile „Published from commit" mit den ersten 7 Zeichen des zuletzt gespeicherten Commits und „No local changes".
 - [ ] Den Token in den Optionen entfernen und das Panel aktualisieren. Erwartet: Ein Hinweis zum fehlenden Token mit der Schaltfläche „Open options". Token danach wieder eintragen.
 - [ ] In Qlik abmelden (zweiter Tab) und im Panel „Refresh" klicken. Erwartet: Ein Hinweis zur Qlik-Sitzung, kein Absturz. Danach wieder anmelden.
 - [ ] „Unlink repository" wählen. Erwartet: Das Panel zeigt „No linked repository", und das bleibt auch nach „Refresh" so.
