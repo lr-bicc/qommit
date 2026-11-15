@@ -11,8 +11,9 @@ test.each([
   ["protected-branch", "The branch is protected. Work on your own branch.", undefined],
   ["network", "Network error.", "retry"],
   ["qlik-session", "Qlik session lost. Sign in to Qlik again or reload the page.", "retry"],
-  ["qlik-read", "Qlik session lost. Sign in to Qlik again or reload the page.", "retry"],
-  ["interrupted", "The page changed while the command was running. Refresh to see the current state.", undefined],
+  ["qlik-read", "Could not read the app from Qlik.", "retry"],
+  ["interrupted", "The command was interrupted. Refresh to see the current state.", undefined],
+  ["app-changed", "This tab now shows a different app. Qommit has refreshed.", undefined],
   ["no-content", "Reload the Qlik page and open Qommit again.", undefined],
   ["branch-exists", "Branch already exists.", undefined],
   ["invalid-branch-name", "Invalid branch name.", undefined],
@@ -37,4 +38,10 @@ test("rate-limited names the local time of the reset", () => {
 
 test("rate-limited without a reset time", () => {
   expect(errorText(e("rate-limited")).text).toBe("GitHub rate limit reached. Try again later.");
+});
+
+test("qlik-read carries the error's message as detail; other codes have none", () => {
+  expect(errorText({ code: "qlik-read", message: "Could not read sheet s1: timeout" }))
+    .toEqual({ text: "Could not read the app from Qlik.", action: "retry", detail: "Could not read sheet s1: timeout" });
+  expect(errorText(e("network")).detail).toBeUndefined();
 });

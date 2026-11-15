@@ -189,6 +189,35 @@ test("a published app is read only", async () => {
   expect(screen.queryByTitle("Unlink repository")).toBeNull();
 });
 
+test("a published app names the commit it was published from, with its branch", async () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const published = { state: "published", repo: "lr-bicc/sales", branch: "release/1", syncedSha: sha } as const;
+  render(<App bridge={fakeBridge({ status: [view(published)], localChanges: [{ repo: "lr-bicc/sales", baseSha: sha, items: [], unmaintained: [] }] })} />);
+  const line = await screen.findByText((_, el) => el?.tagName === "P" && el.textContent?.startsWith("Published from commit 0123456") === true);
+  const link = within(line).getByRole("link");
+  expect(link.textContent).toBe("0123456");
+  expect(link.getAttribute("href")).toBe(`https://github.com/lr-bicc/sales/commit/${sha}`);
+  expect(within(line).getByText("release/1").className).toBe("badge");
+  await screen.findByText("No local changes");
+});
+
+test("a published app without a known commit has no commit line", async () => {
+  const published = { state: "published", repo: "lr-bicc/sales", branch: null, syncedSha: null } as const;
+  render(<App bridge={fakeBridge({ status: [view(published)] })} />);
+  await screen.findByText("Published app – read only. Duplicate the app to make changes.");
+  expect(screen.queryByText(/Published from commit/)).toBeNull();
+});
+
+test("a qlik-read error shows the reason as a second line", async () => {
+  const bridge = fakeBridge({ status: [new BridgeError({ code: "qlik-read", message: "Could not read sheet s1: Qlik did not answer in time." }), view({ state: "unlinked" })] });
+  render(<App bridge={bridge} />);
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("Could not read the app from Qlik.")).toBeTruthy();
+  expect(within(alert).getByText("Could not read sheet s1: Qlik did not answer in time.").className).toBe("detail");
+  fireEvent.click(within(alert).getByText("Retry"));
+  await screen.findByText("No linked repository");
+});
+
 test("duplicated explains the situation", async () => {
   render(<App bridge={fakeBridge({ status: [view({ state: "duplicated", source: { repo: "lr-bicc/sales", branch: null, syncedSha: null }, defaultBranch: "main" })] })} />);
   await screen.findByText("We found a repository for the master Qlik application, from which current application was duplicated");

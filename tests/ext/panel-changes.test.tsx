@@ -238,7 +238,7 @@ test("a failed load shows the error and Retry loads again", async () => {
   const bridge = linkedBridge({ localChanges: [new BridgeError({ code: "qlik-read", message: "x" }), changes(TWO)] });
   render(<App bridge={bridge} />);
   const alert = await screen.findByRole("alert");
-  expect(within(alert).getByText(/Qlik session lost/)).toBeTruthy();
+  expect(within(alert).getByText("Could not read the app from Qlik.")).toBeTruthy();
   fireEvent.click(within(alert).getByText("Retry"));
   await screen.findByText("Overview");
   expect(screen.queryByRole("alert")).toBeNull();
@@ -444,4 +444,26 @@ test("the commit message is sent trimmed", async () => {
   fireEvent.click(screen.getByText("Save"));
   await screen.findByText("Success");
   expect(bridge.commands.find((c) => c.cmd === "commit")).toMatchObject({ message: "Fix" });
+});
+
+test("script entries are ticked and unticked together, with a hint under the group", async () => {
+  const items = [
+    item("data_load_script/Main.qvs", "changed", "script", "Main"),
+    item("data_load_script/tab_order.txt", "changed", "script", "tab_order.txt"),
+    item("data_load_script/New.qvs", "added", "script", "New"),
+    item("objects/sheets/s1.json", "changed", "sheets", "Overview"),
+  ];
+  await openCommit(linkedBridge({ localChanges: [changes(items)] }));
+  expect(screen.getAllByText("The load script is saved as a whole.")).toHaveLength(2); // one per Script group
+  fireEvent.click(check("Main"));
+  for (const label of ["Main", "tab_order.txt", "New"]) expect(check(label).checked).toBe(false);
+  expect(check("Overview").checked).toBe(true);
+  fireEvent.click(check("New"));
+  for (const label of ["Main", "tab_order.txt", "New"]) expect(check(label).checked).toBe(true);
+});
+
+test("the hint is not shown outside commit mode", async () => {
+  render(<App bridge={linkedBridge({ localChanges: [changes([item("data_load_script/Main.qvs", "changed", "script", "Main")])] })} />);
+  await screen.findByText("Script (1)");
+  expect(screen.queryByText("The load script is saved as a whole.")).toBeNull();
 });

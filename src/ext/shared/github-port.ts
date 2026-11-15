@@ -31,18 +31,24 @@ export class GatewayError extends Error {
   }
 }
 
+const isOk = (res: GatewayResponse): res is { ok: true; value: unknown } => res.ok;
+
 /** Builds a GitHubPort that sends every call as a JSON-safe request through `send`. */
 export function createGitHubPort(send: (request: GatewayRequest) => Promise<GatewayResponse>): GitHubPort {
   async function call(op: keyof GitHubPort, ...args: unknown[]): Promise<unknown> {
-    const res = await send({ op, args });
-    if (!res.ok) {
-      const { kind, message, ssoUrl, resetAt } = res.error;
+    const res: unknown = await send({ op, args });
+    // A stopped or restarting service worker answers with nothing at all.
+    if (typeof res !== "object" || res === null || typeof (res as { ok?: unknown }).ok !== "boolean") {
+      throw new GatewayError("internal", "The extension's background service did not answer. Try again.");
+    }
+    if (!isOk(res as GatewayResponse)) {
+      const { kind, message, ssoUrl, resetAt } = (res as { error: WireError }).error;
       const extra: { ssoUrl?: string; resetAt?: number } = {};
       if (ssoUrl !== undefined) extra.ssoUrl = ssoUrl;
       if (resetAt !== undefined) extra.resetAt = resetAt;
       throw new GatewayError(kind, message, extra);
     }
-    return res.value;
+    return (res as { value: unknown }).value;
   }
   return {
     whoAmI: () => call("whoAmI") as Promise<{ login: string }>,

@@ -16,6 +16,8 @@ test("wireSidePanel: action click opens panel, tab updates and option changes se
   fake.store.options = { org: "o", repoPrefix: "", servers: ["https://qlik.example.com"] };
   wireSidePanel();
 
+  await flush();
+  fake.panelBehaviors.length = 0;
   fake.emitInstalled();
   await flush();
   expect(fake.panelBehaviors).toEqual([{ openPanelOnActionClick: true }]);
@@ -35,4 +37,35 @@ test("wireSidePanel: action click opens panel, tab updates and option changes se
     { tabId: 1, path: "panel.html", enabled: true },
     { tabId: 2, path: "panel.html?tabId=2", enabled: true },
   ]);
+});
+
+test("wireSidePanel at start: the action opens the panel and tabs that are already open get their panel", async () => {
+  const fake = installFakeChrome();
+  fake.store.options = { org: "o", repoPrefix: "", servers: ["https://qlik.example.com"] };
+  fake.tabs = [{ id: 1, url: "https://qlik.example.com/qs/sense/app/a" }, { id: 2, url: "https://x.example.com/" }];
+  wireSidePanel();
+  await flush();
+  expect(fake.panelBehaviors).toEqual([{ openPanelOnActionClick: true }]);
+  expect(fake.panelOptions).toEqual([
+    { tabId: 1, path: "panel.html?tabId=1", enabled: true },
+    { tabId: 2, path: "panel.html", enabled: true },
+  ]);
+});
+
+test("wireSidePanel at start swallows failing calls", async () => {
+  installFakeChrome();
+  const api = chrome as any;
+  api.sidePanel.setPanelBehavior = () => Promise.reject(new Error("no side panel"));
+  api.tabs.query = () => Promise.reject(new Error("no tabs"));
+  const unhandled: unknown[] = [];
+  const onUnhandled = (e: unknown) => unhandled.push(e);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    expect(() => wireSidePanel()).not.toThrow();
+    await flush();
+    await flush();
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
 });

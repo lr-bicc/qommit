@@ -1,6 +1,7 @@
 import type { CommandError } from "../shared/commands";
 
-export interface ErrorText { text: string; action?: "options" | "sso" | "retry" }
+/** `detail`: the raw reason, shown as a second, smaller line where it helps. */
+export interface ErrorText { text: string; action?: "options" | "sso" | "retry"; detail?: string }
 
 const two = (n: number): string => String(n).padStart(2, "0");
 
@@ -19,10 +20,10 @@ export function errorText(error: CommandError): ErrorText {
     case "repo-not-found": return { text: "Repository not found or no access." };
     case "protected-branch": return { text: "The branch is protected. Work on your own branch." };
     case "network": return { text: "Network error.", action: "retry" };
-    case "qlik-session":
-    case "qlik-read": return { text: "Qlik session lost. Sign in to Qlik again or reload the page.", action: "retry" };
+    case "qlik-session": return { text: "Qlik session lost. Sign in to Qlik again or reload the page.", action: "retry" };
+    case "qlik-read": return { text: "Could not read the app from Qlik.", action: "retry", detail: error.message };
     case "app-changed": return { text: "This tab now shows a different app. Qommit has refreshed." };
-    case "interrupted": return { text: "The page changed while the command was running. Refresh to see the current state." };
+    case "interrupted": return { text: "The command was interrupted. Refresh to see the current state." };
     case "no-content": return { text: "Reload the Qlik page and open Qommit again." };
     case "branch-exists": return { text: "Branch already exists." };
     case "invalid-branch-name": return { text: "Invalid branch name." };

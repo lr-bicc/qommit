@@ -63,6 +63,12 @@ export function togglePaths(selection: Set<string>, paths: string[], on: boolean
   return next;
 }
 
+/** The paths that a tick on `item` selects or deselects: the load script is saved as a whole. */
+export function pathsToggledWith(items: ChangeItem[], item: ChangeItem): string[] {
+  if (item.group !== "script") return [item.path];
+  return items.filter((i) => i.group === "script").map((i) => i.path);
+}
+
 export function togglePart(selection: Set<string>, items: ChangeItem[], part: Part, on: boolean): Set<string> {
   return togglePaths(selection, items.filter((i) => i.part === part).map((i) => i.path), on);
 }

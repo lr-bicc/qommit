@@ -5,7 +5,7 @@ import type { LocalChanges } from "../flows/local-changes";
 import type { CommitResult } from "../flows/commit";
 import type { Command, CommandError } from "../shared/commands";
 import type { Bridge } from "./bridge";
-import { initialSelection, PARTS, sections, togglePaths, triState, type ChangeGroup, type Tri } from "./changes-model";
+import { initialSelection, PARTS, pathsToggledWith, sections, togglePaths, triState, type ChangeGroup, type Tri } from "./changes-model";
 import { toCommandError } from "./CreateBranchDialog";
 import { Dialog } from "./Dialog";
 import { ErrorMessage } from "./ErrorMessage";
@@ -211,12 +211,13 @@ export function LocalChangesTab(props: { bridge: Bridge; appId: string; readOnly
                     <span aria-hidden="true">{open ? "▾" : "▸"}</span> <span>{`${group.label} (${group.items.length})`}</span>
                   </button>
                 </div>
+                {committing && group.label === "Script" && <p class="hint">The load script is saved as a whole.</p>}
                 {open && (
                   <ul class="entries">
                     {group.items.map((item) => (
                       <li key={item.path} title={item.path}>
                         {committing
-                          ? <TriCheckbox label={item.title} state={selection.has(item.path) ? "all" : "none"} disabled={busy || saved} onToggle={(on) => setSelection((s) => togglePaths(s, [item.path], on))} />
+                          ? <TriCheckbox label={item.title} state={selection.has(item.path) ? "all" : "none"} disabled={busy || saved} onToggle={(on) => setSelection((s) => togglePaths(s, pathsToggledWith(items, item), on))} />
                           : item.title}
                       </li>
                     ))}

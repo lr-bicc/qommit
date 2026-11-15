@@ -167,3 +167,12 @@ test("a branch name the flows accept is accepted by the gateway", async () => {
   expect(await handleGateway({ op: "getBranchSha", args: ["lr-bicc/app", "feature/100%"] }, deps)).toEqual({ ok: true, value: "c1" });
   expect(m.calls.length).toBe(1);
 });
+
+test("an answer of the service worker that is not a result is an internal GatewayError", async () => {
+  for (const answer of [undefined, null, "x", {}]) {
+    const port = createGitHubPort(async () => answer as never);
+    const err = await port.whoAmI().catch((e) => e);
+    expect(err).toBeInstanceOf(GatewayError);
+    expect(err).toMatchObject({ kind: "internal", message: "The extension's background service did not answer. Try again." });
+  }
+});

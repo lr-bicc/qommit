@@ -13,9 +13,25 @@ export function panelOptionsFor(tabId: number, url: string | undefined, servers:
   return { tabId, path: own ? `panel.html?tabId=${tabId}` : "panel.html", enabled: true };
 }
 
+/** Sets the panel options of every open tab; a tab without an id is skipped. */
+async function applyToAllTabs(): Promise<void> {
+  const { servers } = await loadOptions();
+  for (const tab of await chrome.tabs.query({})) {
+    if (tab.id === undefined) continue;
+    await chrome.sidePanel.setOptions(panelOptionsFor(tab.id, tab.url, servers));
+  }
+}
+
+const openOnActionClick = (): Promise<void> => chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
 export function wireSidePanel(): void {
+  // The worker also starts after a browser start or a reload of the extension, without onInstalled:
+  // tabs that were open before get their panel now. Failures here must not stop the worker.
+  void openOnActionClick().catch(() => {});
+  void applyToAllTabs().catch(() => {});
+
   chrome.runtime.onInstalled.addListener(() => {
-    void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    void openOnActionClick().catch(() => {});
   });
 
   chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
@@ -27,12 +43,6 @@ export function wireSidePanel(): void {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !("options" in changes)) return;
-    void (async () => {
-      const { servers } = await loadOptions();
-      for (const tab of await chrome.tabs.query({})) {
-        if (tab.id === undefined) continue;
-        await chrome.sidePanel.setOptions(panelOptionsFor(tab.id, tab.url, servers));
-      }
-    })();
+    void applyToAllTabs();
   });
 }

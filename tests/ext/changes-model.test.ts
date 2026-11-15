@@ -1,6 +1,6 @@
 import { partOf, type ChangeKind, type ObjectGroup } from "../../src/core/diff";
 import type { ChangeItem } from "../../src/ext/flows/local-changes";
-import { initialSelection, PARTS, pullRequestUrl, sections, togglePart } from "../../src/ext/panel/changes-model";
+import { initialSelection, PARTS, pathsToggledWith, pullRequestUrl, sections, togglePart } from "../../src/ext/panel/changes-model";
 
 const item = (path: string, kind: ChangeKind, group: ObjectGroup, title: string): ChangeItem => ({ path, kind, group, part: partOf(group), title });
 
@@ -58,4 +58,17 @@ test("toggling a part leaves the given set untouched", () => {
 
 test("pull request url encodes branch segments", () => {
   expect(pullRequestUrl("lr-bicc/sales", "main", "feature/währung")).toBe("https://github.com/lr-bicc/sales/compare/main...feature/w%C3%A4hrung");
+});
+
+test("a script entry is toggled together with every script entry; other entries alone", () => {
+  const items = [
+    item("data_load_script/Main.qvs", "changed", "script", "Main"),
+    item("data_load_script/New.qvs", "added", "script", "New"),
+    item("data_load_script/tab_order.txt", "changed", "script", "tab_order.txt"),
+    item("objects/sheets/s1.json", "changed", "sheets", "Overview"),
+  ];
+  const script = ["data_load_script/Main.qvs", "data_load_script/New.qvs", "data_load_script/tab_order.txt"];
+  expect(pathsToggledWith(items, items[0]!)).toEqual(script);
+  expect(pathsToggledWith(items, items[1]!)).toEqual(script);
+  expect(pathsToggledWith(items, items[3]!)).toEqual(["objects/sheets/s1.json"]);
 });

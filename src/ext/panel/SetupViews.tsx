@@ -97,6 +97,13 @@ export function SetupViews(props: SetupViewsProps): JSX.Element | null {
       return (
         <section class="view">
           <p>Published app – read only. Duplicate the app to make changes.</p>
+          {status.syncedSha !== null && status.syncedSha !== "" && (
+            <p>
+              {"Published from commit "}
+              <a href={`https://github.com/${status.repo}/commit/${status.syncedSha}`} target="_blank" rel="noreferrer">{status.syncedSha.slice(0, 7)}</a>
+              {status.branch && <>{" "}<span class="badge">{status.branch}</span></>}
+            </p>
+          )}
         </section>
       );
   }
