@@ -1,8 +1,8 @@
 # Design: Qommit – Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
 - **Name des Tools:** Qommit (Paket- und Repo-Name `qommit`, Repo `lr-bicc/qommit`)
-- **Datum:** 2026-11-13 (Revision 9)
-- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike; sie sind in Abschnitt 11 aufgelistet.
+- **Datum:** 2026-11-15 (Revision 10)
+- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12).
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
 - **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
 
@@ -61,7 +61,7 @@ Die Qlik Engine API (WebSocket) prüft den `Origin`-Header gegen die Host-Whitel
 | Service Worker | Hintergrund | Einziger Halter des Tokens; GitHub-Client; öffnet das Side Panel beim Klick auf das Extension-Icon. Hält keinen Zustand im Speicher. |
 | Content Script | Qlik-Seite, isolierte Welt | Engine-Zugriff via enigma.js; liest und schreibt statische Dateien; führt Update-Pläne aus; zeigt Diff-Overlay in Shadow DOM |
 
-**Side Panel:** Benötigt Chrome 116 oder neuer. Tabs der eingetragenen Qlik-Server erhalten ihr eigenes Panel; es zeigt immer den Stand des Tabs, zu dem es gehört. Auf allen anderen Tabs zeigt das Panel nur den Hinweis, dass der Server in den Optionen eingetragen sein muss, mit einem Link dorthin.
+**Side Panel:** Benötigt Chrome 116 oder neuer. Tabs der eingetragenen Qlik-Server erhalten ihr eigenes Panel; es zeigt immer den Stand des Tabs, zu dem es gehört. Auf allen anderen Tabs zeigt das Panel nur den Hinweis, dass der Server in den Optionen eingetragen sein muss, mit einem Link dorthin. Zeigt der Tab eine andere App als zuvor, lädt das Panel neu. Jeder Befehl, der etwas ändert, nennt die App, die das Panel zeigt, und wird abgelehnt, wenn der Tab inzwischen eine andere zeigt.
 
 **Engine-Zugriff aus dem Content Script:** Netzwerkzugriffe eines Content Scripts laufen unter dem Origin der Seite, also mit deren Cookie und einem Origin, den der Virtual Proxy akzeptiert. Der Spike (Abschnitt 9) bestätigt das für WebSockets; schlägt er fehl, wandert nur der Engine-Zugriff in ein Main-World-Skript.
 
@@ -153,9 +153,10 @@ Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt 
 - `syncedSha` ist der Commit, auf dem die App steht: der letzte eigene Commit oder der Commit, auf den zuletzt aktualisiert wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD). Nach einem Update auf einen älteren Commit meldet das Panel deshalb wie gitoqlok „Repository has N new commits“.
 - gitoqlok arbeitet nach demselben Prinzip: Es legt in der App ein generisches Objekt mit `qId` und `qType` `_gitoqlikMetaData` ab; die Angaben (Repo, letzter Commit) liegen darin unter `_data.infoByServerType.github` (Spike). Die Extension liest daraus das Repo (`full_name`) und den letzten Commit (`lastCommitId`). Den Branch entnimmt sie der Branch-Tabelle des Repos; steht die App dort nicht, gilt sie als Kopie einer versionierten App.
 - Lässt sich das Objekt nicht anlegen (veröffentlichte App, fehlende Rechte), liegen dieselben Angaben in `chrome.storage.local`; die Erkennung von Kopien entfällt dann.
+- **Unlink** entfernt das Link-Objekt und merkt sich in `chrome.storage.local`, dass die App getrennt wurde. Solange die App kein Link-Objekt hat, sucht die Extension dann nicht mehr nach einem Repo für sie; die Zeile in der Branch-Tabelle bleibt stehen. Ein erneutes Verbinden hebt das auf.
 
 ### Im Repo: Branch-Tabelle in README.md
-Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik application` mit der URL der App je Branch. Die Extension ergänzt beim Anlegen eines Branches eine Zeile (Commit „Update branches table“ auf dem Default-Branch; ist dieser geschützt, auf dem neuen Branch). Pro Branch-Name gibt es genau eine Zeile; eine vorhandene Zeile gleichen Namens wird ersetzt.
+Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik application` mit der URL der App je Branch. Die Extension ergänzt beim Anlegen eines Branches eine Zeile (Commit „Update branches table“ auf dem Default-Branch; ist dieser geschützt, auf dem neuen Branch). Pro Branch-Name gibt es genau eine Zeile; eine vorhandene Zeile gleichen Namens wird ersetzt. Ausnahme ist die Zeile des Default-Branches: Sobald sie eine App nennt, bleibt sie unverändert, weil ihre App-ID die feste Marke für alle Datei-URLs des Repos ist (4.3); eine weitere App, die mit dem Default-Branch verbunden wird, ist nur über ihr Link-Objekt verknüpft. Lehnt GitHub die Zeile ab, weil jeder Branch, der sie tragen könnte, geschützt ist, entfällt die Zeile, und die App wird trotzdem verknüpft.
 
 ### Auflösung beim Öffnen einer App
 1. Link-Objekt mit passender `appId` → verknüpft.
@@ -192,15 +193,15 @@ Create Branch:
 - Existiert der Branch-Name bereits → Fehlermeldung, nichts wird geändert.
 
 ### 6.4 Local Changes
-Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; ist er neuer als `syncedSha`, zeigt der Kopf die Zahl der Commits dazwischen.
+Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; ist er neuer als `syncedSha`, zeigt der Kopf die Zahl der Commits dazwischen. Unterscheiden sich `syncedSha` und HEAD in keiner gepflegten Datei (etwa nur durch „Update branches table“ oder einen Merge ohne Änderung), gilt die App als aktuell: `syncedSha` wird stillschweigend auf den HEAD gesetzt. Dasselbe gilt vor einem Commit.
 
 ### 6.5 Save changes (Commit)
 1. „Save changes“ schaltet den Reiter in den Commit-Modus, wie bei gitoqlok:
    - „Choose what to save“ mit den Teilen Load script, App Objects, Bookmarks, Attached files. Vorausgewählt sind alle Teile mit Änderungen.
-   - Jede Gruppe und jedes einzelne Objekt in den Listen erhält ein Häkchen; so lässt sich genau wählen, was in den Commit kommt.
+   - Jede Gruppe und jedes einzelne Objekt in den Listen erhält ein Häkchen; so lässt sich genau wählen, was in den Commit kommt. Das Ladeskript wird nur als Ganzes gespeichert: Die Skript-Tabs und `tab_order.txt` werden gemeinsam an- und abgewählt, weil ein einzelner Tab ohne passende Reihenfolge einen Stand ergibt, den das Update ablehnt.
    - Pflichtfeld für die Commit-Nachricht, Schaltflächen **Save** und **Back**. Nach Erfolg zeigt die Schaltfläche „Success“, und die Liste wird neu geladen.
-2. **Steht die App nicht auf dem Branch-HEAD** (`syncedSha` ≠ HEAD), fragt die Extension vor dem Commit nach: „Update first“ (Standard) oder „Commit anyway“. Ein Commit ist ein Schnappschuss der App; auf einen neueren Stand gesetzt, dreht er dessen Änderungen zurück. „Commit anyway“ listet deshalb die Commits, die überschrieben würden, und ist der Weg, einen älteren Stand bewusst wieder zum aktuellen zu machen.
-3. Die App wird frisch gelesen. Der Service Worker lädt die gewählten geänderten Dateien als Blobs hoch (max. 5 parallel, Binärdateien base64), erzeugt den Tree auf Basis des HEAD-Trees (gelöschte Dateien mit `sha: null`), erzeugt den Commit und setzt den Branch per Fast-Forward.
+2. **Steht die App nicht auf dem Branch-HEAD** (`syncedSha` ≠ HEAD), fragt die Extension vor dem Commit nach: „Update first“ (Standard) oder „Commit anyway“. Ein Commit ist ein Schnappschuss der App; auf einen neueren Stand gesetzt, dreht er dessen Änderungen zurück. „Commit anyway“ listet deshalb die Commits, die überschrieben würden, und ist der Weg, einen älteren Stand bewusst wieder zum aktuellen zu machen. Ein Commit auf einen veralteten Stand geht nur von dieser Schaltfläche aus, einmal pro Klick; „Retry“ nach einem Fehler prüft erneut.
+3. Die App wird frisch gelesen. Der Service Worker sendet Textdateien direkt im Tree-Aufruf mit, in aufeinander aufbauenden Aufrufen von höchstens 1 MB Inhalt; nur Binärdateien und Textdateien über 1 MB lädt er vorab als Blobs hoch (max. 5 parallel, Binärdateien base64). Der erste Tree baut auf dem HEAD-Tree auf (gelöschte Dateien mit `sha: null`); danach erzeugt er den Commit und setzt den Branch per Fast-Forward. So braucht auch der erste Commit einer großen App nur wenige Aufrufe.
 4. Schlägt das Setzen des Branches fehl, weil inzwischen jemand committet hat → die Nachfrage aus Schritt 2 erscheint, nichts geht verloren.
 5. Danach `syncedSha` = neuer Commit. Nicht gewählte Änderungen bleiben als lokale Änderungen stehen. Ohne Auswahl gibt es keinen Commit.
 
@@ -245,7 +246,8 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 ### Qlik
 | Fall | Verhalten |
 |---|---|
-| Keine/abgelaufene Sitzung, WebSocket geschlossen | Hinweis, sich in Qlik neu anzumelden bzw. die Seite neu zu laden |
+| Keine/abgelaufene Sitzung, WebSocket geschlossen, Qlik antwortet nicht (Zeitgrenze: 20 s für den Verbindungsaufbau, 30 s je Engine-Aufruf, 60 s je Datei) | Hinweis, sich in Qlik neu anzumelden bzw. die Seite neu zu laden; der nächste Befehl öffnet eine neue Sitzung |
+| Ein Objekt oder eine Datei der App lässt sich nicht lesen | Der Vorgang bricht ab; das Panel nennt das Objekt. Ein unvollständiger Stand wird nie verglichen oder gespeichert. Eine Anmeldeseite an Stelle einer Datei gilt als Lesefehler. |
 | Fehlende Schreibrechte | Update gesperrt |
 | Fehler mitten im Update | Stopp beim ersten Fehler; das Panel zeigt erledigte und offene Aktionen sowie die Engine-Meldung; `syncedSha` bleibt unverändert. Die App lässt sich per Update erneut auf den Zielstand oder auf den Sicherungs-Branch bringen. |
 | Zielstand enthält fehlerhafte Dateien (z. B. nach einem falsch gelösten Merge-Konflikt) | Update startet nicht; Liste der Dateien mit Link nach GitHub |
@@ -310,3 +312,15 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 3, 7 | Panel auf Tabs nicht eingetragener Server: nur Hinweis mit Link zu den Optionen. | Abschnitt 3 und 7 widersprachen sich; ohne Host-Berechtigung sieht die Extension die Adresse des Tabs nicht. |
 | 7 | Grenze des Service Workers: feste Liste von Aufrufen, nur Repos der eingestellten Org. Die Optionsseite greift auf den Token zu. | Die Verknüpfung liegt in der App und lässt sich vom Service Worker nicht prüfen. |
 | 9 | Spike abgeschlossen, Verweis auf die Ergebnisse. | – |
+
+## 12. Änderungen in Revision 10 (aus der Umsetzung von Plan 2)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 3 | Das Panel folgt seinem Tab; ändernde Befehle nennen ihre App. | Nach einer Navigation im selben Tab hätte ein Befehl sonst eine andere App getroffen, als das Panel zeigt. |
+| 5 | Die Zeile des Default-Branches bleibt stehen, sobald sie eine App nennt. Bei geschützten Branches entfällt die Zeile, die Verknüpfung nicht. | Die App-ID dieser Zeile ist die Marke aus 4.3; ein Ersetzen hätte in allen Apps des Repos jede Datei mit Bildern als geändert gezeigt. |
+| 5 | Unlink bleibt wirksam (lokale Markierung). | Ohne sie fand die Extension die App über die Branch-Tabelle sofort wieder. |
+| 6.4, 6.5 | Kein „hinter dem Branch“, wenn sich keine gepflegte Datei unterscheidet. | Jede frische Kopie hätte beim ersten Speichern wegen „Update branches table“ nach „Commit anyway“ gefragt. |
+| 6.5 | Das Ladeskript wird als Ganzes gespeichert. „Commit anyway“ nur per eigenem Klick. | Ein Tab ohne passende `tab_order.txt` ergibt einen ungültigen Stand. |
+| 6.5 | Textdateien gehen im Tree-Aufruf mit statt als einzelne Blobs. | Der erste Commit der Referenz-App hätte rund 440 Aufrufe gebraucht und GitHubs sekundäres Limit riskiert. |
+| 7 | Zeitgrenzen für Qlik-Aufrufe; Lesefehler nennen das Objekt. | Ein hängender Aufruf hätte das Panel bis zum Neuladen der Seite gesperrt. |
