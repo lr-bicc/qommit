@@ -46,6 +46,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
   const [progress, setProgress] = useState("Ready");
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [tab, setTab] = useState<"changes" | "history">("changes");
+  const [reloadToken, setReloadToken] = useState(0); // a new value makes the open tab load its data again
   const alive = useRef(true);
   const inflight = useRef(0); // commands in flight; unlike `running` it is current before the next render
   const busy = running > 0;
@@ -65,7 +66,8 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
     }
   }, [bridge]);
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (reloadTab = true): Promise<void> => {
+    if (reloadTab) setReloadToken((n) => n + 1);
     try {
       const next = await run<StatusView>({ cmd: "status" });
       if (!alive.current) return;
@@ -112,8 +114,8 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
             <button type="button" role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>History</button>
           </div>
           {tab === "changes"
-            ? <LocalChangesTab bridge={bridge} readOnly={false} onSaved={() => void load()} />
-            : <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} />}
+            ? <LocalChangesTab bridge={bridge} readOnly={false} onSaved={() => void load(false)} reloadToken={reloadToken} />
+            : <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken} />}
         </>
       );
     } else {
@@ -128,7 +130,7 @@ function Panel({ bridge }: { bridge: Bridge }): JSX.Element {
             onUnlink={() => setDialog("unlink")}
           />
           {status.state === "published" && status.syncedSha !== null && status.syncedSha !== "" && (
-            <LocalChangesTab bridge={bridge} readOnly={true} onSaved={() => void load()} />
+            <LocalChangesTab bridge={bridge} readOnly={true} onSaved={() => void load(false)} reloadToken={reloadToken} />
           )}
         </>
       );

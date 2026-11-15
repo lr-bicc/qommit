@@ -146,12 +146,12 @@ test("repo-missing: Unlink Repository asks first, then unlinks and reloads", asy
   render(<App bridge={bridge} />);
   await screen.findByText("Repository not found or no access.");
   fireEvent.click(screen.getAllByText("Unlink Repository")[0]);
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status"]);
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByText("Unlink this app from lr-bicc/sales?")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Unlink"));
   await screen.findByText("No linked repository");
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "unlink", "status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "status"]);
 });
 
 test("the header Unlink sends only after the confirmation and Cancel does nothing", async () => {
@@ -161,12 +161,12 @@ test("the header Unlink sends only after the confirmation and Cancel does nothin
   fireEvent.click(screen.getByTitle("Unlink repository"));
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel"));
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status"]);
   fireEvent.click(screen.getByTitle("Unlink repository"));
   expect(screen.getByText("Unlink this app from lr-bicc/sales?")).toBeTruthy();
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
   await screen.findByText("No linked repository");
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "unlink", "status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "status"]);
 });
 
 test("a linked app shows the two tabs", async () => {
@@ -385,5 +385,5 @@ test("a failed unlink keeps the confirmation open with the error and can be repe
   await within(screen.getByRole("dialog")).findByText("Network error.");
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
   await screen.findByText("No linked repository");
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "unlink", "unlink", "status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "unlink", "status"]);
 });

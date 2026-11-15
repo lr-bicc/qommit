@@ -37,3 +37,16 @@ fieldset { border: 0; padding: 0; margin: 8px 0 0; }
 .repo-list button { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; }
 .repo-list button.selected { background: #0b66d022; font-weight: 600; }
 .repo-list .muted { padding: 4px 8px; }
+h3 { font-size: 13px; margin: 12px 0 4px; }
+.section + .section { margin-top: 4px; }
+.group-header { display: flex; align-items: center; gap: 6px; }
+button.group-toggle { flex: 1; text-align: left; border: 0; background: none; padding: 2px 0; font-weight: 600; }
+.entries { list-style: none; margin: 0 0 4px 18px; padding: 0; overflow-wrap: anywhere; }
+.entries .check { margin: 2px 0; align-items: center; }
+.commit textarea { font: inherit; width: 100%; padding: 4px 6px; margin-top: 8px; resize: vertical; }
+.commit fieldset .check { margin: 2px 0; }
+.commits { list-style: none; margin: 8px 0; padding: 0; }
+.commits li { padding: 4px 0; border-bottom: 1px solid #8883; overflow-wrap: anywhere; }
+.commit-message { font-weight: 600; }
+.commit-meta { font-size: 12px; }
+.history > button { margin: 8px 0; }
