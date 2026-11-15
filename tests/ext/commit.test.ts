@@ -44,11 +44,63 @@ test("a changed selected file is written", async () => {
 
 test("a moved branch is reported instead of committed", async () => {
   const { ports, github, link } = await linked();
-  await github.commitFiles(link.repo, { branch: "main", parentSha: link.syncedSha, message: "theirs", changes: [{ path: "x.txt", content: "1" }] });
+  await github.commitFiles(link.repo, { branch: "main", parentSha: link.syncedSha, message: "theirs", changes: [{ path: "objects/measures/m-theirs.json", content: "{}" }] });
   const count = github.commitCount(link.repo);
   const result = await commitChanges(ports, { link, message: "m", paths: ["objects/dimensions/d-new.json"], removeUnmaintained: false, allowBehind: false });
   expect((result as { behind: CommitInfo[] }).behind.map((c) => c.message)).toEqual(["theirs"]);
   expect(github.commitCount(link.repo)).toBe(count);
+});
+
+test("a head that moved only outside the maintained files is not behind: the commit builds on it", async () => {
+  const { ports, github, app, link } = await linked();
+  const readme = github.filesAt(link.repo, link.syncedSha).get("README.md") as string;
+  const head = await github.commitFiles(link.repo, { branch: "main", parentSha: link.syncedSha, message: "Update branches table",
+    changes: [{ path: "README.md", content: `${readme}\n` }, { path: "builds/b.qvf", content: new Uint8Array([2]) }] });
+  const spy = github.commitFiles;
+  let parent = "";
+  github.commitFiles = (repo, inp) => { parent = inp.parentSha; return spy(repo, inp); };
+  const result = await commitChanges(ports, input(link, { allowBehind: false }));
+  expect(parent).toBe(head);
+  const { sha } = result as { sha: string };
+  expect(github.head(link.repo, "main")).toBe(sha);
+  expect(app.link!.syncedSha).toBe(sha);
+});
+
+test("selecting one changed script file commits the whole load script", async () => {
+  const { ports, github, app, link } = await linked();
+  app.snapshot.script = "///$tab Main\r\nSET a=2;\r\n///$tab Extra\r\nSET b=1;\r\n///$tab Load / Data\r\nLOAD * INLINE [x];\r\n";
+  const before = github.filesAt(link.repo, link.syncedSha);
+  const spy = github.commitFiles;
+  let changes: { path: string }[] = [];
+  github.commitFiles = (repo, inp) => { changes = inp.changes; return spy(repo, inp); };
+  await commitChanges(ports, input(link, { paths: ["data_load_script/Main.qvs"] }));
+  expect(changes.map((c) => c.path)).toEqual(["data_load_script/Main.qvs", "data_load_script/Extra.qvs", "data_load_script/tab_order.txt"]);
+  expect(before.has("data_load_script/tab_order.txt")).toBe(true);
+});
+
+test("a commit without any script path leaves the script files alone", async () => {
+  const { ports, github, app, link } = await linked();
+  app.snapshot.script = "///$tab Main\r\nSET a=2;\r\n";
+  const spy = github.commitFiles;
+  let changes: { path: string }[] = [];
+  github.commitFiles = (repo, inp) => { changes = inp.changes; return spy(repo, inp); };
+  await commitChanges(ports, input(link, { paths: [NEW_DIM] }));
+  expect(changes.map((c) => c.path)).toEqual([NEW_DIM]);
+});
+
+test("a deleted script tab is part of the whole script", async () => {
+  const { ports, github, app, link } = await linked();
+  app.snapshot.script = "///$tab Main\r\nSET a=2;\r\n";
+  const removed = [...github.filesAt(link.repo, link.syncedSha).keys()]
+    .filter((p) => p.startsWith("data_load_script/") && p !== "data_load_script/Main.qvs" && p !== "data_load_script/tab_order.txt");
+  expect(removed).toHaveLength(1);
+  const spy = github.commitFiles;
+  let changes: { path: string; content: unknown }[] = [];
+  github.commitFiles = (repo, inp) => { changes = inp.changes; return spy(repo, inp); };
+  await commitChanges(ports, input(link, { paths: ["data_load_script/Main.qvs"] }));
+  expect(changes.map((c) => [c.path, c.content === null])).toEqual([
+    ["data_load_script/Main.qvs", false], [removed[0], true], ["data_load_script/tab_order.txt", false],
+  ]);
 });
 
 test("commit anyway builds on the head and keeps what was not selected", async () => {

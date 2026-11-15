@@ -42,7 +42,12 @@ export function fakeGitHub(): GitHubPort & {
 
   const newSha = (): string => "c0de".repeat(8) + (++counter).toString(16).padStart(8, "0");
   const notFound = (what: string) => new GatewayError("not-found", `${what} not found`);
+  /** Like the gateway: repositories outside the configured organisation are refused. */
+  const guard = (name: string): void => {
+    if (!name.toLowerCase().startsWith(`${ORG}/`)) throw new GatewayError("not-allowed", "Repository is outside the configured organisation");
+  };
   const repoOf = (name: string): FakeRepo => {
+    guard(name);
     const r = repos.get(name);
     if (!r) throw notFound(`repository ${name}`);
     return r;
@@ -112,6 +117,7 @@ export function fakeGitHub(): GitHubPort & {
       return null;
     },
     async getRepo(repo) {
+      guard(repo);
       const r = repos.get(repo);
       return r ? { repo, defaultBranch: r.defaultBranch } : null;
     },

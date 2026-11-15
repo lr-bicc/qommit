@@ -1,3 +1,4 @@
+import { groupOf } from "../../core/diff";
 import type { AppSnapshot } from "../../core/types";
 import type { LinkData } from "../../qlik/link";
 import type { GitHubPort } from "../shared/github-port";
@@ -71,4 +72,23 @@ export async function isAncestor(github: GitHubPort, repo: string, sha: string, 
     if (e instanceof GatewayError && e.kind === "not-found") return false;
     throw e;
   }
+}
+
+/**
+ * True when both commits have the same blob for every path the tool maintains; README.md and the
+ * unmaintained files do not count. An unknown commit counts as different.
+ */
+export async function sameMaintainedTree(github: GitHubPort, repo: string, shaA: string, shaB: string): Promise<boolean> {
+  if (shaA === shaB) return true;
+  let a: Map<string, string>, b: Map<string, string>;
+  try {
+    [a, b] = await Promise.all([github.getTree(repo, shaA), github.getTree(repo, shaB)]);
+  } catch (e) {
+    if (e instanceof GatewayError && e.kind === "not-found") return false;
+    throw e;
+  }
+  const maintained = (tree: Map<string, string>) => [...tree].filter(([path]) => groupOf(path) !== null);
+  const left = maintained(a);
+  const right = maintained(b);
+  return left.length === right.length && left.every(([path, sha]) => b.get(path) === sha);
 }

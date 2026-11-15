@@ -19,7 +19,8 @@ function setup(init?: Parameters<typeof fakePorts>[0], opts: { devRow?: boolean;
 
 async function commit(github: ReturnType<typeof fakePorts>["github"], branch: string, n: string) {
   const sha = await github.commitFiles(REPO, {
-    branch, parentSha: github.head(REPO, branch), message: `change ${n}`, changes: [{ path: `f${n}.txt`, content: n }],
+    branch, parentSha: github.head(REPO, branch), message: `change ${n}`,
+    changes: [{ path: `objects/measures/m${n}.json`, content: `{"n":${n}}` }],
   });
   return sha;
 }
@@ -76,6 +77,42 @@ describe("resolveStatus", () => {
     app.link = { repo: REPO, branch: "dev", appId: APP_ID, syncedSha: first };
     github.deleteBranch(REPO, "dev");
     expect(await resolveStatus(ports)).toMatchObject({ state: "branch-missing", defaultBranch: "main", link: { branch: "dev" } });
+  });
+
+  it("branch head one 'Update branches table' commit ahead -> behindBy 0 and the link advanced", async () => {
+    const { ports, app, github, first } = setup();
+    app.link = { repo: REPO, branch: "main", appId: APP_ID, syncedSha: first };
+    const readme = github.filesAt(REPO, first).get("README.md") as string;
+    const head = await github.commitFiles(REPO, { branch: "main", parentSha: first, message: "Update branches table",
+      changes: [{ path: "README.md", content: upsertBranchRow(readme, { branch: "dev", appUrl: urlFor(CANON_ID) }) }] });
+    expect(await resolveStatus(ports)).toMatchObject({ state: "linked", behindBy: 0, headSha: head, link: { syncedSha: head } });
+    expect(app.link).toEqual({ repo: REPO, branch: "main", appId: APP_ID, syncedSha: head });
+  });
+
+  it("branch head one real change ahead -> behindBy 1 and the link unchanged", async () => {
+    const { ports, app, github, first } = setup();
+    app.link = { repo: REPO, branch: "main", appId: APP_ID, syncedSha: first };
+    await commit(github, "main", "1");
+    expect(await resolveStatus(ports)).toMatchObject({ state: "linked", behindBy: 1, link: { syncedSha: first } });
+    expect(app.link!.syncedSha).toBe(first);
+  });
+
+  it("duplicated with a deleted source branch -> source.branch null", async () => {
+    const { ports, app, github, first } = setup();
+    await github.createBranch(REPO, "dev", first);
+    app.link = { repo: REPO, branch: "dev", appId: CANON_ID, syncedSha: first };
+    github.deleteBranch(REPO, "dev");
+    expect(await resolveStatus(ports)).toEqual({
+      state: "duplicated", source: { repo: REPO, branch: null, syncedSha: first }, defaultBranch: "main",
+    });
+  });
+
+  it("link to a repository outside the organisation -> repo-missing", async () => {
+    const { ports, app } = setup();
+    app.link = { repo: "other-org/x", branch: "main", appId: APP_ID, syncedSha: "a".repeat(40) };
+    expect(await resolveStatus(ports)).toEqual({ state: "repo-missing", repo: "other-org/x" });
+    app.link = { repo: "other-org/x", branch: "main", appId: CANON_ID, syncedSha: "a".repeat(40) };
+    expect(await resolveStatus(ports)).toEqual({ state: "repo-missing", repo: "other-org/x" });
   });
 
   it("link to lr-bicc/gone -> repo-missing", async () => {

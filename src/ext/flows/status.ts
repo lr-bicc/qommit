@@ -1,7 +1,8 @@
 import { findBranchForApp, parseBranchTable } from "../../core/repo-layout";
 import type { LinkData } from "../../qlik/link";
 import { GatewayError } from "../shared/github-port";
-import { cacheKey, isAncestor, saveLink, type FlowPorts } from "./ports";
+import type { GitHubPort } from "../shared/github-port";
+import { cacheKey, isAncestor, sameMaintainedTree, saveLink, type FlowPorts } from "./ports";
 
 export interface CopySource { repo: string; branch: string | null; syncedSha: string | null }
 
@@ -15,12 +16,28 @@ export type AppStatus =
 
 const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
+/** The linked repository; null when it does not exist or lies outside the configured organisation. */
+async function linkedRepo(github: GitHubPort, repo: string): Promise<{ repo: string; defaultBranch: string } | null> {
+  try {
+    return await github.getRepo(repo);
+  } catch (e) {
+    if (e instanceof GatewayError && e.kind === "not-allowed") return null;
+    throw e;
+  }
+}
+
 async function resolveLinked(ports: FlowPorts, link: LinkData, stored: "app" | "local"): Promise<AppStatus> {
   const { github } = ports;
-  const repo = await github.getRepo(link.repo);
+  const repo = await linkedRepo(github, link.repo);
   if (!repo) return { state: "repo-missing", repo: link.repo };
   const headSha = await github.getBranchSha(link.repo, link.branch);
   if (headSha === null) return { state: "branch-missing", link, defaultBranch: repo.defaultBranch };
+  if (link.syncedSha !== headSha && (await sameMaintainedTree(github, link.repo, link.syncedSha, headSha))) {
+    // Only the README or unmaintained files moved on: the app is up to date with the head.
+    const advanced: LinkData = { ...link, syncedSha: headSha };
+    const savedTo = await saveLink(ports, advanced);
+    return { state: "linked", link: advanced, defaultBranch: repo.defaultBranch, headSha, behindBy: 0, stored: savedTo };
+  }
   let behindBy = 0;
   if (link.syncedSha !== headSha) {
     try {
@@ -40,11 +57,12 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
   if (link) {
     if (info.published) return { state: "published", repo: link.repo, branch: link.branch, syncedSha: link.syncedSha };
     if (sameId(link.appId, info.id)) return resolveLinked(ports, link, "app");
-    const repo = await github.getRepo(link.repo);
+    const repo = await linkedRepo(github, link.repo);
     if (!repo) return { state: "repo-missing", repo: link.repo };
+    const branch = (await github.getBranchSha(link.repo, link.branch)) === null ? null : link.branch;
     return {
       state: "duplicated",
-      source: { repo: link.repo, branch: link.branch, syncedSha: link.syncedSha },
+      source: { repo: link.repo, branch, syncedSha: link.syncedSha },
       defaultBranch: repo.defaultBranch,
     };
   }

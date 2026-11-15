@@ -1,8 +1,8 @@
-import { parseBranchTable } from "../../src/core/repo-layout";
+import { parseBranchTable, upsertBranchRow } from "../../src/core/repo-layout";
 import { FlowError } from "../../src/ext/flows/ports";
 import { resolveStatus } from "../../src/ext/flows/status";
 import { connectRepository, createBranchForCopy, createRepository, suggestBranchName, unlinkApp } from "../../src/ext/flows/setup";
-import { APP_ID } from "../fixtures/snapshot";
+import { APP_ID, CANON_ID } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
 import { legacyRepo } from "./helpers";
 
@@ -151,6 +151,32 @@ test("connect to an existing branch whose row is already there commits nothing",
   const link = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
   expect(github.commitCount("lr-bicc/sales")).toBe(count);
   expect(link.syncedSha).toBe(github.head("lr-bicc/sales", "main"));
+});
+
+test("connect to the default branch whose row carries another app's id: no commit, row unchanged, app linked", async () => {
+  const { ports, github, app } = fakePorts();
+  const first = legacyRepo(github);
+  const before = readme(github, first);
+  expect(parseBranchTable(before).find((r) => r.branch === "main")?.appId).toBe(CANON_ID);
+  const link = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "main" });
+  expect(github.head("lr-bicc/sales", "main")).toBe(first);
+  expect(readme(github, github.head("lr-bicc/sales", "main"))).toBe(before);
+  expect(link).toEqual({ repo: "lr-bicc/sales", branch: "main", appId: APP_ID, syncedSha: first });
+  expect(app.link).toEqual(link);
+});
+
+test("connect to a non-default branch whose row carries another app's id: the row is replaced", async () => {
+  const { ports, github } = fakePorts();
+  const first = legacyRepo(github);
+  const withDev = upsertBranchRow(readme(github, first), { branch: "dev", appUrl: `https://qlik.example.com/qs/sense/app/${CANON_ID}` });
+  const base = await github.commitFiles("lr-bicc/sales", { branch: "main", parentSha: first, message: "Update branches table", changes: [{ path: "README.md", content: withDev }] });
+  await github.createBranch("lr-bicc/sales", "dev", base);
+  await connectRepository(ports, { repo: "lr-bicc/sales", mode: "existing-branch", branch: "dev" });
+  const main = github.head("lr-bicc/sales", "main");
+  expect(main).not.toBe(base);
+  const rows = parseBranchTable(readme(github, main));
+  expect(rows.filter((r) => r.branch === "dev")).toEqual([{ branch: "dev", appUrl: URL, appId: APP_ID }]);
+  expect(rows.find((r) => r.branch === "main")?.appId).toBe(CANON_ID);
 });
 
 test("existing branch, default branch protected: the row lands on the chosen branch", async () => {

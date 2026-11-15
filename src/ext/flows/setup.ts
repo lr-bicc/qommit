@@ -1,4 +1,4 @@
-import { createReadme, repoSlug, repoSlugWithId, upsertBranchRow } from "../../core/repo-layout";
+import { createReadme, parseBranchTable, repoSlug, repoSlugWithId, upsertBranchRow } from "../../core/repo-layout";
 import { serializeApp } from "../../core/serializer";
 import type { FileChange } from "../../github/repo";
 import { isValidRefName } from "../../github/repo";
@@ -47,6 +47,12 @@ async function commitRow(ports: FlowPorts, repo: string, onBranch: string, row: 
   return github.commitFiles(repo, {
     branch: onBranch, parentSha, message: TABLE_COMMIT_MESSAGE, changes: [{ path: "README.md", content }],
   });
+}
+
+/** The branch table on the default branch has a row for `branch` that names an app. */
+async function hasAppRow(github: GitHubPort, repo: string, branch: string): Promise<boolean> {
+  const readme = await github.readTextFile(repo, branch, "README.md");
+  return readme !== null && parseBranchTable(readme).some((r) => r.branch === branch && r.appId !== null);
 }
 
 const isProtected = (e: unknown): boolean => e instanceof GatewayError && e.kind === "protected-branch";
@@ -142,17 +148,22 @@ export async function connectRepository(
     const { defaultBranch } = await requireRepo(github, repo);
     await headOf(github, repo, branch);
     const row = { branch, appUrl: info.url };
+    // The default branch's row is a fixed marker (it names the canonical app id): once it carries an app,
+    // connecting another app to the default branch leaves it as it is.
+    const keepRow = branch === defaultBranch && (await hasAppRow(github, repo, defaultBranch));
     // The link object in the app is the binding record, the row a convenience: when every branch that
     // could carry the row is protected, the app is linked without it.
-    try {
-      await commitRow(ports, repo, defaultBranch, row);
-    } catch (e) {
-      if (!isProtected(e)) throw e;
-      if (branch !== defaultBranch) {
-        try {
-          await commitRow(ports, repo, branch, row);
-        } catch (e2) {
-          if (!isProtected(e2)) throw e2;
+    if (!keepRow) {
+      try {
+        await commitRow(ports, repo, defaultBranch, row);
+      } catch (e) {
+        if (!isProtected(e)) throw e;
+        if (branch !== defaultBranch) {
+          try {
+            await commitRow(ports, repo, branch, row);
+          } catch (e2) {
+            if (!isProtected(e2)) throw e2;
+          }
         }
       }
     }
