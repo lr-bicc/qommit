@@ -1,0 +1,66 @@
+# Abnahme-Checkliste Plan 2: Qommit-Extension, erste Stufe
+
+Du führst diese Liste gegen den Testserver `https://lr-analytics-test.lrworld.com` aus. Hake jeden Schritt ab, wenn das erwartete Ergebnis eintritt. Weicht etwas ab, notiere den Wortlaut und mache ein Bildschirmfoto (siehe Abschnitt 8).
+
+## Was diese Version kann und was nicht
+
+Diese Version verbindet eine Qlik-Sense-App mit einem GitHub-Repository, zeigt lokale Änderungen und speichert ausgewählte Änderungen als Commit. Sie kann noch **nicht**:
+
+- **Update** (Stand aus GitHub in die App zurückschreiben),
+- Diff-Details (Inhalt einer Änderung ansehen),
+- Tags,
+- Import.
+
+In der Qlik-App wird nichts verändert außer einem versteckten Objekt (Typ `qommit-link`), das die Verknüpfung zum Repository speichert. Es erscheint in keinem Sheet. Veröffentlichte Apps werden nie beschrieben.
+
+## 1. Einrichten
+
+- [ ] `npm run build:ext` ausführen, in Chrome `chrome://extensions` öffnen, „Entwicklermodus" einschalten, „Entpackte Erweiterung laden" und den Ordner `dist/ext` wählen. Erwartet: Qommit erscheint ohne Fehlermeldung in der Liste.
+- [ ] Optionen der Extension öffnen, deinen GitHub-Token eintragen und speichern. Erwartet: Der Token wird gespeichert, das Feld zeigt ihn nicht im Klartext.
+- [ ] „Check connection" klicken. Erwartet: Erfolgsmeldung mit deinem GitHub-Benutzernamen.
+- [ ] Server `https://lr-analytics-test.lrworld.com` hinzufügen. Erwartet: Chrome fragt nach der Berechtigung für diese Seite, nach Zustimmung steht der Server in der Liste.
+
+## 2. Bestehendes gitoqlok-Repo
+
+- [ ] Im Hub die veröffentlichte „Supply Chain Performance" duplizieren, die Kopie öffnen und das Qommit-Panel öffnen. Erwartet: Das Panel weist darauf hin, dass dies die Kopie einer versionierten App ist.
+- [ ] „Create Branch" wählen und einen eigenen Branch-Namen eingeben. Erwartet auf GitHub: Der neue Branch existiert im Repository, und auf dem Standard-Branch gibt es einen Commit „Update branches table" (die README-Tabelle enthält die neue Zeile). Das Panel zeigt die App danach als verknüpft mit dem neuen Branch.
+
+## 3. Local Changes der frischen Kopie
+
+Die Zahlen gelten für eine frische Kopie der veröffentlichten „Supply Chain Performance", die du in Abschnitt 2 gerade angelegt hast und an der du noch nichts geändert hast.
+
+- [ ] Tab „Local Changes" öffnen und den Ladefortschritt abwarten. Erwartet (laut Spike): 11 geänderte Sheets, 2 geänderte Dimensionen, 357 gelöschte Variablen, sonst nichts.
+- [ ] „Remove files no longer maintained" ansehen. Erwartet: Die Option nennt 5 Dateien: `loadScript.qvs`, `objects/fields.json`, `objects/themes.json`, `objects/glossarylinks.json` und `builds/<id>.qvf`.
+- [ ] Weicht eine Zahl ab, notiere sie und mache ein Bildschirmfoto.
+
+## 4. Save changes mit allen Einträgen
+
+- [ ] Alle Einträge ausgewählt lassen, Commit-Nachricht eingeben, „Save changes" klicken. Erwartet: Ein neuer Commit liegt auf dem Branch, und das Panel zeigt „No local changes".
+- [ ] Seite neu laden, danach die Daten der App neu laden (Skript ausführen). Erwartet: Weiterhin „No local changes" (Erfolgskriterium 3).
+
+## 5. Änderung in der App
+
+- [ ] In der App ein Measure und einen Skript-Tab ändern (ohne zu veröffentlichen). Panel auf „Refresh". Erwartet: Genau diese zwei Einträge unter Local Changes.
+- [ ] Nur das Measure auswählen und speichern. Erwartet: Commit enthält nur das Measure; der Skript-Tab bleibt weiterhin als Änderung stehen.
+
+## 6. Neues Repo
+
+- [ ] Eine kleine App ohne Repository öffnen. Erwartet: Das Panel bietet „Create repository" an.
+- [ ] „Create repository" klicken. Erwartet auf GitHub: Das neue Repository ist privat und hat eine `README.md` mit Branch-Tabelle. Das Panel zeigt die App als verknüpft und danach „No local changes".
+
+## 7. Sonderfälle
+
+- [ ] Eine veröffentlichte App öffnen. Erwartet: Das Panel zeigt Informationen (nur lesen), bietet kein Speichern oder Verknüpfen an, und in der App wird nichts geschrieben.
+- [ ] Den Token in den Optionen entfernen und das Panel aktualisieren. Erwartet: Ein Hinweis zum fehlenden Token mit der Schaltfläche „Open options". Token danach wieder eintragen.
+- [ ] In Qlik abmelden (zweiter Tab) und im Panel „Refresh" klicken. Erwartet: Ein Hinweis zur Qlik-Sitzung, kein Absturz. Danach wieder anmelden.
+- [ ] „Unlink repository" wählen. Erwartet: Das Panel zeigt „No linked repository", und das bleibt auch nach „Refresh" so.
+- [ ] Eine zweite, unabhängige kleine App öffnen und sie mit „To existing branch" an ein vorhandenes Repository und dessen Branch hängen. Erwartet: Die App ist verknüpft, und die Branch-Tabelle des Repositories hat eine neue Zeile für diese App.
+
+## 8. Rückmeldung
+
+Bitte melde zurück:
+
+- [ ] Wie lange das Laden der Local Changes gedauert hat (Sekunden, bei „Supply Chain Performance").
+- [ ] Unerwartete Einträge unter Local Changes, mit Bildschirmfoto.
+- [ ] Alle Fehlermeldungen im Wortlaut.
+- [ ] Welche Schritte oben nicht wie erwartet liefen (Nummer und Abweichung).
