@@ -20,11 +20,14 @@ test("commit sequence: blobs, tree, commit, fast-forward ref", async () => {
   ] });
   expect(sha).toBe("c1");
   const blobs = m.calls.filter(x => x.url.endsWith("/git/blobs")).map(x => x.body);
-  expect(blobs).toContainEqual({ content: "{}", encoding: "utf-8" });
-  expect(blobs).toContainEqual({ content: "AQID", encoding: "base64" });
-  const tree = m.calls.find(x => x.url.endsWith("/git/trees"))!.body as { base_tree: string; tree: { path: string; sha: string | null }[] };
+  expect(blobs).toEqual([{ content: "AQID", encoding: "base64" }]);
+  const tree = m.calls.find(x => x.url.endsWith("/git/trees"))!.body as { base_tree: string; tree: unknown[] };
   expect(tree.base_tree).toBe("t0");
-  expect(tree.tree.find(e => e.path === "objects/sheets/gone.json")!.sha).toBeNull();
+  expect(tree.tree).toEqual([
+    { path: "objects/sheets/a.json", mode: "100644", type: "blob", content: "{}" },
+    { path: "appcontent/logo.png", mode: "100644", type: "blob", sha: "b1" },
+    { path: "objects/sheets/gone.json", mode: "100644", type: "blob", sha: null },
+  ]);
   expect(m.calls.at(-2)!.body).toEqual({ message: "msg", tree: "t1", parents: ["p1"] });
   expect(m.calls.at(-1)!.body).toEqual({ sha: "c1", force: false });
 });
@@ -92,20 +95,20 @@ test("slash branch names, list mappings, non-not-found errors propagate, many bl
   expect(await listTags(c, "lr-bicc/demo")).toEqual([{ name: "v1", sha: "c1" }]);
   expect(await listCommits(c, "lr-bicc/demo", "feature/x", 2)).toEqual([{ sha: "c1", message: "m1", author: "A", date: "2026-01-01T00:00:00Z" }]);
   expect((await compare(c, "lr-bicc/demo", "a", "b")).commits).toEqual([{ sha: "c2", message: "m2", author: "B", date: "d" }]);
-  const changes = Array.from({ length: 12 }, (_, i) => ({ path: `f${i}`, content: "x" }));
+  const changes = Array.from({ length: 12 }, (_, i) => ({ path: `f${i}`, content: new Uint8Array([i]) }));
   await commitFiles(c, "lr-bicc/demo", { branch: "feature/x", parentSha: "p1", message: "m", changes });
   expect(m.calls.filter(x => x.url.endsWith("/git/blobs")).length).toBe(12);
 });
 test("tree entries map each path to the sha of its own blob, even when blobs finish out of order", async () => {
   const changes = [
-    { path: "objects/sheets/a.json", content: "{\"a\":1}" },
-    { path: "objects/sheets/b.json", content: "{\"b\":2}" },
-    { path: "objects/sheets/gone.json", content: null },
+    { path: "appcontent/a.png", content: new Uint8Array([1]) },
+    { path: "appcontent/b.png", content: new Uint8Array([2]) },
+    { path: "appcontent/gone.png", content: null },
     { path: "appcontent/logo.png", content: new Uint8Array([1, 2, 3]) },
-    { path: "data_load_script/Main.qvs", content: "///$tab Main\r\nSET a=1;" },
-    { path: "objects/measures/m.json", content: "{\"m\":3}" },
-    { path: "objects/variables/v.json", content: "{\"v\":4}" },
-    { path: "objects/dimensions/d.json", content: "{\"d\":5}" },
+    { path: "appcontent/c.png", content: new Uint8Array([3]) },
+    { path: "appcontent/d.png", content: new Uint8Array([4]) },
+    { path: "appcontent/e.png", content: new Uint8Array([5]) },
+    { path: "appcontent/f.png", content: new Uint8Array([6]) },
   ];
   const expectedBlobs = changes.filter((ch) => ch.content !== null).length;
   const shaOf = (body: { content: string; encoding: string }) => `sha(${body.encoding}:${body.content})`;
@@ -131,17 +134,98 @@ test("tree entries map each path to the sha of its own blob, even when blobs fin
   const tree = (m.calls.find(x => x.url.endsWith("/git/trees"))!.body as { tree: unknown[] }).tree;
   const blob = (path: string, sha: string | null) => ({ path, mode: "100644", type: "blob", sha });
   expect(tree).toEqual([
-    blob("objects/sheets/a.json", "sha(utf-8:{\"a\":1})"),
-    blob("objects/sheets/b.json", "sha(utf-8:{\"b\":2})"),
-    blob("objects/sheets/gone.json", null),
+    blob("appcontent/a.png", "sha(base64:AQ==)"),
+    blob("appcontent/b.png", "sha(base64:Ag==)"),
+    blob("appcontent/gone.png", null),
     blob("appcontent/logo.png", "sha(base64:AQID)"),
-    blob("data_load_script/Main.qvs", "sha(utf-8:///$tab Main\r\nSET a=1;)"),
-    blob("objects/measures/m.json", "sha(utf-8:{\"m\":3})"),
-    blob("objects/variables/v.json", "sha(utf-8:{\"v\":4})"),
-    blob("objects/dimensions/d.json", "sha(utf-8:{\"d\":5})"),
+    blob("appcontent/c.png", "sha(base64:Aw==)"),
+    blob("appcontent/d.png", "sha(base64:BA==)"),
+    blob("appcontent/e.png", "sha(base64:BQ==)"),
+    blob("appcontent/f.png", "sha(base64:Bg==)"),
   ]);
   expect(received).toBe(expectedBlobs);
   expect(peak).toBeLessThanOrEqual(5);
+});
+
+test("a text change is sent inline, without a blob request", async () => {
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: "t1" } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  await commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m",
+    changes: [{ path: "data_load_script/Main.qvs", content: "///$tab Main\r\nSET a=1;" }] });
+  expect(m.calls.some(x => x.url.endsWith("/git/blobs"))).toBe(false);
+  expect(m.calls.find(x => x.url.endsWith("/git/trees"))!.body).toEqual({ base_tree: "t0", tree: [
+    { path: "data_load_script/Main.qvs", mode: "100644", type: "blob", content: "///$tab Main\r\nSET a=1;" }] });
+});
+test("large text is split over chained tree requests; deletions travel with their batch", async () => {
+  let k = 0;
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: `t${++k}` } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  const big = (ch: string) => ch.repeat(600_000);
+  await commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m", changes: [
+    { path: "a.json", content: big("a") },
+    { path: "b.json", content: big("b") },
+    { path: "gone.json", content: null },
+    { path: "c.json", content: big("c") },
+  ] });
+  expect(m.calls.some(x => x.url.endsWith("/git/blobs"))).toBe(false);
+  const trees = m.calls.filter(x => x.url.endsWith("/git/trees")).map(x => x.body as { base_tree: string; tree: { path: string; sha?: string | null }[] });
+  expect(trees.map(t => t.base_tree)).toEqual(["t0", "t1", "t2"]);
+  expect(trees.map(t => t.tree.map(e => e.path))).toEqual([["a.json"], ["b.json", "gone.json"], ["c.json"]]);
+  expect(trees[1].tree[1]).toEqual({ path: "gone.json", mode: "100644", type: "blob", sha: null });
+  expect(m.calls.at(-2)!.body).toEqual({ message: "m", tree: "t3", parents: ["p1"] });
+});
+test("two 400,000-byte texts share one tree request, the third opens the next", async () => {
+  let k = 0;
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: `t${++k}` } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  await commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m", changes: [
+    { path: "a.json", content: "a".repeat(400_000) },
+    { path: "b.json", content: "b".repeat(400_000) },
+    { path: "c.json", content: "c".repeat(400_000) },
+  ] });
+  const trees = m.calls.filter(x => x.url.endsWith("/git/trees")).map(x => x.body as { base_tree: string; tree: { path: string }[] });
+  expect(trees.map(t => [t.base_tree, t.tree.map(e => e.path)])).toEqual([["t0", ["a.json", "b.json"]], ["t1", ["c.json"]]]);
+  expect(m.calls.at(-2)!.body).toEqual({ message: "m", tree: "t2", parents: ["p1"] });
+});
+test("a text above 1,000,000 UTF-8 bytes goes through a blob; a tree failure leaves the branch untouched", async () => {
+  const huge = "ä".repeat(600_000); // 1,200,000 bytes in UTF-8
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/blobs`]: () => ({ status: 201, body: { sha: "b1" } }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: "t1" } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  await commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m", changes: [{ path: "big.json", content: huge }] });
+  expect(m.calls.filter(x => x.url.endsWith("/git/blobs")).map(x => x.body)).toEqual([{ content: huge, encoding: "utf-8" }]);
+  expect((m.calls.find(x => x.url.endsWith("/git/trees"))!.body as { tree: unknown[] }).tree)
+    .toEqual([{ path: "big.json", mode: "100644", type: "blob", sha: "b1" }]);
+
+  let k = 0;
+  const failing = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
+    [`POST ${R}/git/trees`]: () => (++k === 2 ? { status: 500, body: { message: "boom" } } : { status: 201, body: { sha: "t1" } }),
+  });
+  const c2 = createGitHubClient({ token: "t", fetch: failing.fetch });
+  await expect(commitFiles(c2, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m", changes: [
+    { path: "a.json", content: "a".repeat(600_000) }, { path: "b.json", content: "b".repeat(600_000) }] })).rejects.toBeInstanceOf(Error);
+  expect(failing.calls.some(x => x.method === "PATCH" || x.url.endsWith("/git/commits"))).toBe(false);
 });
 
 test("getRepo returns name and default branch, null when missing", async () => {

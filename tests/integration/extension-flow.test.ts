@@ -133,8 +133,14 @@ function memoryGitHub() {
     }
     if (method === "POST" && rest === "/git/trees") {
       const map = new Map(trees.get(body.base_tree));
-      for (const e of body.tree as { path: string; sha: string | null }[]) {
-        if (e.sha === null) map.delete(e.path);
+      for (const e of body.tree as { path: string; sha?: string | null; content?: string }[]) {
+        if (typeof e.content === "string") {
+          // An inline entry is stored under the real git blob SHA of its content.
+          const bytes = new TextEncoder().encode(e.content);
+          const sha = await gitBlobSha(bytes);
+          blobs.set(sha, bytes);
+          map.set(e.path, sha);
+        } else if (e.sha === null || e.sha === undefined) map.delete(e.path);
         else map.set(e.path, e.sha);
       }
       const sha = hex();
