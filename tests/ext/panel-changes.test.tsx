@@ -378,3 +378,69 @@ test("the History tab opens from the app", async () => {
   fireEvent.click(screen.getByRole("tab", { name: "History" }));
   await screen.findByText("msg 0");
 });
+
+test("Retry after a failed commit sends what the form shows now, with the behind check on", async () => {
+  const bridge = linkedBridge({
+    localChanges: [changes(TWO)],
+    commit: [new BridgeError({ code: "network", message: "x" }), { sha: "n" }],
+  });
+  await openCommit(bridge);
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
+  fireEvent.click(screen.getByText("Save"));
+  const alert = await screen.findByRole("alert");
+  fireEvent.click(check("Overview"));
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Better" } });
+  fireEvent.click(within(alert).getByText("Retry"));
+  await screen.findByText("Success");
+  const commits = bridge.commands.filter((c) => c.cmd === "commit");
+  expect(commits[1]).toEqual({ cmd: "commit", message: "Better", paths: ["objects/sheets/s2.json"], removeUnmaintained: false, allowBehind: false });
+});
+
+test("a failed Commit anyway stays in the dialog and sends allowBehind only per click", async () => {
+  const bridge = linkedBridge({
+    localChanges: [changes(TWO)],
+    commit: [{ behind: [theirs] }, new BridgeError({ code: "network", message: "x" }), new BridgeError({ code: "network", message: "x" })],
+  });
+  await openCommit(bridge);
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
+  fireEvent.click(screen.getByText("Save"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByText("Commit anyway"));
+  await within(await screen.findByRole("dialog")).findByText("Network error.");
+  expect(within(dialog).queryByText("Retry")).toBeNull();
+  const sent = (): number => bridge.commands.filter((c) => c.cmd === "commit" && c.allowBehind).length;
+  await flush();
+  expect(sent()).toBe(1);
+  fireEvent.click(within(dialog).getByText("Commit anyway"));
+  await waitFor(() => expect(sent()).toBe(2));
+  fireEvent.click(within(dialog).getByText("Cancel"));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect((screen.getByPlaceholderText("Commit message") as HTMLTextAreaElement).value).toBe("Fix");
+});
+
+test("a failed reload after a save shows the error with Retry", async () => {
+  const bridge = linkedBridge({
+    localChanges: [changes(TWO), new BridgeError({ code: "network", message: "x" }), changes([])],
+    commit: [{ sha: "n" }],
+  });
+  await openCommit(bridge);
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
+  fireEvent.click(screen.getByText("Save"));
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("Network error.")).toBeTruthy();
+  await flush();
+  expect(screen.queryByText("Choose what to save")).toBeNull();
+  expect(screen.queryByText("Loading…")).toBeNull();
+  fireEvent.click(within(screen.getByRole("alert")).getByText("Retry"));
+  await screen.findByText("No local changes");
+});
+
+test("the commit message is sent trimmed", async () => {
+  const bridge = linkedBridge({ localChanges: [changes(TWO)], commit: [{ sha: "n" }] });
+  await openCommit(bridge);
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "  Fix  " } });
+  fireEvent.click(screen.getByText("Save"));
+  await screen.findByText("Success");
+  expect(bridge.commands.find((c) => c.cmd === "commit")).toMatchObject({ message: "Fix" });
+});

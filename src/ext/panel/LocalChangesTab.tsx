@@ -9,6 +9,7 @@ import { initialSelection, PARTS, sections, togglePaths, triState, type ChangeGr
 import { toCommandError } from "./CreateBranchDialog";
 import { Dialog } from "./Dialog";
 import { ErrorMessage } from "./ErrorMessage";
+import { errorText } from "./errors";
 
 const COLLAPSE_ABOVE = 20;
 
@@ -30,6 +31,18 @@ function TriCheckbox(props: { state: Tri; label?: string; ariaLabel?: string; di
   return props.label === undefined ? box : <label class="check">{box}<span>{props.label}</span></label>;
 }
 
+/** An error inside a dialog: the text and the action that fits it, but no Retry (the dialog's own buttons repeat). */
+function DialogError(props: { error: CommandError; onOptions(): void }): JSX.Element {
+  const { text, action } = errorText(props.error);
+  return (
+    <div class="error" role="alert">
+      <p>{text}</p>
+      {action === "options" && <button type="button" onClick={props.onOptions}>Open options</button>}
+      {action === "sso" && props.error.ssoUrl !== undefined && <a class="button" href={props.error.ssoUrl} target="_blank" rel="noreferrer">Authorize</a>}
+    </div>
+  );
+}
+
 export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSaved(): void; reloadToken?: number }): JSX.Element {
   const { bridge, readOnly, reloadToken } = props;
   const [data, setData] = useState<LocalChanges | null>(null);
@@ -42,12 +55,12 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [behind, setBehind] = useState<CommitInfo[] | null>(null);
+  const [behindError, setBehindError] = useState<CommandError | null>(null); // a failed "Commit anyway", shown in the dialog
   const [expanded, setExpanded] = useState<Map<string, boolean>>(new Map());
   const alive = useRef(true);
   const request = useRef(0); // answers of older loads are dropped
   const inflight = useRef(false); // a commit is on its way; unlike `saving` it is current before the next render
   const known = useRef<Set<string>>(new Set()); // paths of the list that is shown
-  const lastCommit = useRef<CommitCommand | null>(null);
 
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -96,17 +109,17 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
     setCommitting(false);
     setSaved(false);
     setBehind(null);
+    setBehindError(null);
     setMessage("");
-    setFailure(null);
   }
 
   /** Sends the commit; one at a time. */
   async function submit(command: CommitCommand): Promise<void> {
     if (inflight.current) return;
     inflight.current = true;
-    lastCommit.current = command;
     setSaving(true);
     setFailure(null);
+    setBehindError(null);
     let result: CommitResult;
     try {
       result = await bridge.send<CommitResult>(command);
@@ -114,8 +127,9 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
       inflight.current = false;
       if (!alive.current) return;
       setSaving(false);
-      setBehind(null);
-      setFailure({ source: "commit", error: toCommandError(e) });
+      // Inside the behind dialog the error is shown there; the dialog stays open.
+      if (command.allowBehind) setBehindError(toCommandError(e));
+      else setFailure({ source: "commit", error: toCommandError(e) });
       return;
     }
     inflight.current = false;
@@ -134,7 +148,7 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
 
   const commitCommand = (allowBehind: boolean): CommitCommand => ({
     cmd: "commit",
-    message,
+    message: message.trim(),
     paths: items.filter((i) => selection.has(i.path)).map((i) => i.path),
     removeUnmaintained: removing,
     allowBehind,
@@ -148,7 +162,7 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
 
   const retry = (): void => {
     if (failure?.source === "commit") {
-      if (lastCommit.current) void submit(lastCommit.current);
+      void submit(commitCommand(false)); // what the form shows now; the behind check runs again
     } else {
       void load();
     }
@@ -232,7 +246,7 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
           />
           <div class="buttons">
             <button type="button" class="primary" disabled={!canSave} onClick={() => void submit(commitCommand(false))}>{saved ? "Success" : "Save"}</button>
-            <button type="button" disabled={busy || saved} onClick={leaveCommit}>Back</button>
+            <button type="button" disabled={busy || saved} onClick={() => { leaveCommit(); setFailure(null); }}>Back</button>
           </div>
         </div>
       )}
@@ -242,10 +256,11 @@ export function LocalChangesTab(props: { bridge: Bridge; readOnly: boolean; onSa
           <ul class="commits">
             {behind.map((c) => <li key={c.sha}>{c.message.split("\n")[0]}</li>)}
           </ul>
+          {behindError && <DialogError error={behindError} onOptions={() => bridge.openOptions()} />}
           <p class="muted">Updating the app is not part of this version yet.</p>
           <div class="buttons">
-            <button type="button" class="primary" disabled={saving} onClick={() => void submit({ ...(lastCommit.current ?? commitCommand(false)), allowBehind: true })}>Commit anyway</button>
-            <button type="button" disabled={saving} onClick={() => setBehind(null)}>Cancel</button>
+            <button type="button" class="primary" disabled={saving} onClick={() => void submit(commitCommand(true))}>Commit anyway</button>
+            <button type="button" disabled={saving} onClick={() => { setBehind(null); setBehindError(null); }}>Cancel</button>
           </div>
         </Dialog>
       )}
