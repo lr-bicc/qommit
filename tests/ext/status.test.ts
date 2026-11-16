@@ -120,6 +120,18 @@ describe("resolveStatus", () => {
     expect(await resolveStatus(ports)).toEqual({ state: "unlinked" });
   });
 
+  it("gitoqlok metadata naming an organisation repository the token cannot see -> repo-missing, not unlinked", async () => {
+    // GitHub answers 404 both for a deleted repository and for one the token has no access to
+    // (e.g. a fine-grained token without that repository).
+    const { ports } = setup({ meta: { repo: "lr-bicc/gone", lastCommitId: "c".repeat(40) } }, { readmeApp: CANON_ID });
+    expect(await resolveStatus(ports)).toEqual({ state: "repo-missing", repo: "lr-bicc/gone" });
+  });
+
+  it("same, app published -> repo-missing", async () => {
+    const { ports } = setup({ meta: { repo: "lr-bicc/gone", lastCommitId: null }, info: { published: true } }, { readmeApp: CANON_ID });
+    expect(await resolveStatus(ports)).toEqual({ state: "repo-missing", repo: "lr-bicc/gone" });
+  });
+
   it("link to lr-bicc/gone -> repo-missing", async () => {
     const { ports, app } = setup();
     app.link = { repo: "lr-bicc/gone", branch: "main", appId: APP_ID, syncedSha: "a".repeat(40) };

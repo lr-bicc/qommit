@@ -16,14 +16,22 @@ export type AppStatus =
 
 const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
-/** The linked repository; null when it does not exist or lies outside the configured organisation. */
-async function linkedRepo(github: GitHubPort, repo: string): Promise<{ repo: string; defaultBranch: string } | null> {
+type RepoRef = { repo: string; defaultBranch: string };
+
+/** The repository; "outside" when it lies outside the configured organisation, null when GitHub does not show it. */
+async function lookupRepo(github: GitHubPort, repo: string): Promise<RepoRef | "outside" | null> {
   try {
     return await github.getRepo(repo);
   } catch (e) {
-    if (e instanceof GatewayError && e.kind === "not-allowed") return null;
+    if (e instanceof GatewayError && e.kind === "not-allowed") return "outside";
     throw e;
   }
+}
+
+/** The linked repository; null when it does not exist or lies outside the configured organisation. */
+async function linkedRepo(github: GitHubPort, repo: string): Promise<RepoRef | null> {
+  const found = await lookupRepo(github, repo);
+  return found === "outside" ? null : found;
 }
 
 async function resolveLinked(ports: FlowPorts, link: LinkData, stored: "app" | "local"): Promise<AppStatus> {
@@ -75,8 +83,14 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
 
   // No link anywhere: look for the app in the repositories.
   const meta = await app.readGitoqlokMeta();
-  // Metadata naming a repository outside the organisation is ignored, like one that does not exist.
-  const metaRepo = meta?.repo ? await linkedRepo(github, meta.repo) : null;
+  // Metadata naming a repository outside the organisation is ignored. One inside it that GitHub does not show
+  // (deleted, or the token has no access to it) is reported: treating the app as unlinked would hide the cause.
+  let metaRepo: RepoRef | null = null;
+  if (meta?.repo) {
+    const found = await lookupRepo(github, meta.repo);
+    if (found === null) return { state: "repo-missing", repo: meta.repo };
+    if (found !== "outside") metaRepo = found;
+  }
   let hit: { repo: string; branch: string } | null = null;
   if (metaRepo) {
     const readme = await github.readTextFile(metaRepo.repo, metaRepo.defaultBranch, "README.md");
