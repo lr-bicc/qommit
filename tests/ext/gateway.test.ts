@@ -108,6 +108,7 @@ test("traversal and malformed refs, shas, paths and names are rejected before an
   const { m, deps } = setup();
   const commit = (over: Record<string, unknown>) => ({ op: "commitFiles", args: ["lr-bicc/app", { branch: "main", parentSha: "abc123", message: "m", changes: [{ path: "a.json", content: { text: "x" } }], ...over }] });
   const bad = [
+    commit({ replaceRoot: "yes" }),
     { op: "getTree", args: ["lr-bicc/app", "../../../../../repos/other-org/priv/git/trees/abc123"] },
     { op: "getBranchSha", args: ["lr-bicc/app", "../../../x"] },
     { op: "getBranchSha", args: ["lr-bicc/app", "a?b"] },

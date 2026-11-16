@@ -24,8 +24,9 @@ function isWireContent(v: unknown): v is WireContent {
 }
 
 /** Validates and converts the wire form of commitFiles' input; null when malformed. */
-function parseCommitInput(v: unknown): { branch: string; parentSha: string; message: string; changes: FileChange[] } | null {
+function parseCommitInput(v: unknown): { branch: string; parentSha: string; message: string; changes: FileChange[]; replaceRoot?: boolean } | null {
   if (!isObject(v) || !isString(v.branch) || !isString(v.parentSha) || !isString(v.message) || !Array.isArray(v.changes)) return null;
+  if (v.replaceRoot !== undefined && typeof v.replaceRoot !== "boolean") return null;
   if (!isValidArg("ref", v.branch) || !isValidArg("sha", v.parentSha)) return null;
   const changes: FileChange[] = [];
   for (const c of v.changes) {
@@ -39,7 +40,7 @@ function parseCommitInput(v: unknown): { branch: string; parentSha: string; mess
       }
     } else return null;
   }
-  return { branch: v.branch, parentSha: v.parentSha, message: v.message, changes };
+  return { branch: v.branch, parentSha: v.parentSha, message: v.message, changes, ...(v.replaceRoot ? { replaceRoot: true } : {}) };
 }
 
 interface OpSpec {

@@ -121,7 +121,7 @@ function memoryGitHub() {
     }
     if (method === "GET" && (g = /^\/git\/commits\/([0-9a-f]+)$/.exec(rest))) {
       const c = r.commits.get(g[1]!);
-      return c ? json({ sha: c.sha, tree: { sha: c.tree } }) : notFound();
+      return c ? json({ sha: c.sha, tree: { sha: c.tree }, parents: c.parents.map((sha) => ({ sha })) }) : notFound();
     }
     if (method === "POST" && rest === "/git/blobs") {
       const bytes = body.encoding === "base64"
@@ -156,7 +156,7 @@ function memoryGitHub() {
       const name = decode(g[1]!);
       const current = r.branches.get(name);
       if (!current) return notFound();
-      if (!ancestors(r, body.sha).has(current)) return json({ message: "Update is not a fast forward" }, 422);
+      if (!body.force && !ancestors(r, body.sha).has(current)) return json({ message: "Update is not a fast forward" }, 422);
       r.branches.set(name, body.sha);
       return json({ ref: `refs/heads/${name}`, object: { sha: body.sha } });
     }
@@ -204,6 +204,7 @@ function memoryGitHub() {
     has: (repo: string) => repos.has(repo),
     head: (repo: string, branch: string) => repos.get(repo)!.branches.get(branch)!,
     message: (repo: string, sha: string) => repos.get(repo)!.commits.get(sha)!.message,
+    parents: (repo: string, sha: string) => repos.get(repo)!.commits.get(sha)!.parents,
   };
 }
 
@@ -266,6 +267,7 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
   expect(gh.has(link.repo)).toBe(true);
   expect(link.syncedSha).toBe(gh.head(link.repo, link.branch));
   expect(gh.message(link.repo, link.syncedSha)).toBe("Initial commit");
+  expect(gh.parents(link.repo, link.syncedSha)).toEqual([]); // replaces GitHub's own first commit
   const paths = gh.pathsAt(link.repo, link.branch);
   expect(paths).toContain("README.md");
   expect(paths).toContain("appcontent/logo.png");

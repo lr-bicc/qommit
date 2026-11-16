@@ -18,6 +18,8 @@ test("create repository commits the app and a readme with the branch table", asy
   expect(parseBranchTable(files.get("README.md") as string)).toEqual([{ branch: "main", appUrl: URL, appId: APP_ID }]);
   expect(files.has("data_load_script/tab_order.txt")).toBe(true);
   expect(github.messageOf(link.repo, link.syncedSha)).toBe("Initial commit");
+  // GitHub's own first commit (auto_init) is replaced: the history holds one commit
+  expect((await github.listCommits(link.repo, "main", 1)).map((c) => c.message)).toEqual(["Initial commit"]);
   expect(app.link).toEqual({ repo: link.repo, branch: "main", appId: APP_ID, syncedSha: github.head(link.repo, "main") });
 });
 

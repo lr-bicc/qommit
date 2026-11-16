@@ -70,11 +70,15 @@ type TreeEntry =
  * Text up to MAX_INLINE_BYTES travels inline in the tree requests; binary content and larger text
  * are uploaded as blobs first. Trees are chained so no request carries more than MAX_INLINE_BYTES
  * of inline content. The branch only moves with the final ref update.
+ *
+ * `replaceRoot` replaces a first commit (one without parents, such as the one GitHub creates with `auto_init`)
+ * instead of building on it: the new commit has no parents and the branch is forced onto it.
  */
 export async function commitFiles(c: GitHubClient, repo: string,
-  input: { branch: string; parentSha: string; message: string; changes: FileChange[] }): Promise<string> {
+  input: { branch: string; parentSha: string; message: string; changes: FileChange[]; replaceRoot?: boolean }): Promise<string> {
   if (input.changes.length === 0) throw new Error("Nothing to commit");
-  const parent = await c.rest<{ tree: { sha: string } }>("GET", `/repos/${repo}/git/commits/${input.parentSha}`);
+  const parent = await c.rest<{ tree: { sha: string }; parents?: unknown[] }>("GET", `/repos/${repo}/git/commits/${input.parentSha}`);
+  if (input.replaceRoot && (parent.parents ?? []).length !== 0) throw new Error(`${input.parentSha} is not the first commit`);
 
   const encoder = new TextEncoder();
   const entries: TreeEntry[] = new Array(input.changes.length);
@@ -127,8 +131,9 @@ export async function commitFiles(c: GitHubClient, repo: string,
   await flush();
 
   const commit = await c.rest<{ sha: string }>("POST", `/repos/${repo}/git/commits`,
-    { message: input.message, tree: treeSha, parents: [input.parentSha] });
-  await c.rest("PATCH", `/repos/${repo}/git/refs/heads/${encodePath(input.branch)}`, { sha: commit.sha, force: false });
+    { message: input.message, tree: treeSha, parents: input.replaceRoot ? [] : [input.parentSha] });
+  await c.rest("PATCH", `/repos/${repo}/git/refs/heads/${encodePath(input.branch)}`,
+    { sha: commit.sha, force: input.replaceRoot === true });
   return commit.sha;
 }
 

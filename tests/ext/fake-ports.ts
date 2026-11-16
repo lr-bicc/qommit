@@ -169,12 +169,13 @@ export function fakeGitHub(): GitHubPort & {
         throw new GatewayError("not-fast-forward", "branch moved");
       }
       if (current !== input.parentSha) throw new GatewayError("not-fast-forward", "branch is not at parentSha");
+      if (input.replaceRoot && commitOf(r, input.parentSha).parents.length !== 0) throw new Error("not the first commit");
       const files = cloneFiles(commitOf(r, input.parentSha).files);
       for (const ch of input.changes) {
         if (ch.content === null) files.delete(ch.path);
         else files.set(ch.path, cloneContent(ch.content));
       }
-      const c = addCommit(r, [input.parentSha], input.message, files);
+      const c = addCommit(r, input.replaceRoot ? [] : [input.parentSha], input.message, files);
       r.branches.set(input.branch, c.sha);
       return c.sha;
     },

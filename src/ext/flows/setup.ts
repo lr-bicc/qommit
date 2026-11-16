@@ -128,6 +128,7 @@ export async function createRepository(ports: FlowPorts, input: { name?: string 
   const changes: FileChange[] = [...files].map(([path, content]) => ({ path, content }));
   const syncedSha = await github.commitFiles(repo, {
     branch: defaultBranch, parentSha: await headOf(github, repo, defaultBranch), message: "Initial commit", changes,
+    replaceRoot: true, // GitHub's own first commit (auto_init) only holds a placeholder README: one "Initial commit"
   });
   const link: LinkData = { repo, branch: defaultBranch, appId: info.id, syncedSha };
   await saveLink(ports, link);

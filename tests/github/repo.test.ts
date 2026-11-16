@@ -47,6 +47,28 @@ test("rejected fast-forward surfaces as not-fast-forward; empty commit is refuse
     .rejects.toThrow("Nothing to commit");
   expect(m.calls.length).toBe(before);
 });
+test("replacing the first commit: a commit without parents, forced onto the branch", async () => {
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" }, parents: [] } }),
+    [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: "t1" } }),
+    [`POST ${R}/git/commits`]: () => ({ status: 201, body: { sha: "c1" } }),
+    [`PATCH ${R}/git/refs/heads/main`]: () => ({ body: {} }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(await commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "Initial commit",
+    changes: [{ path: "README.md", content: "# x" }], replaceRoot: true })).toBe("c1");
+  expect(m.calls.at(-2)!.body).toEqual({ message: "Initial commit", tree: "t1", parents: [] });
+  expect(m.calls.at(-1)!.body).toEqual({ sha: "c1", force: true });
+});
+test("only a first commit can be replaced", async () => {
+  const m = mockFetch({
+    [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" }, parents: [{ sha: "p0" }] } }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  await expect(commitFiles(c, "lr-bicc/demo", { branch: "main", parentSha: "p1", message: "m",
+    changes: [{ path: "a", content: "x" }], replaceRoot: true })).rejects.toThrow("not the first commit");
+  expect(m.calls.length).toBe(1);
+});
 test("tree, branch lookup, branch creation, compare, tag", async () => {
   const m = mockFetch({
     [`GET ${R}/git/trees/c1?recursive=1`]: () => ({ body: { truncated: false, tree: [

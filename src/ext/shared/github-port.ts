@@ -16,7 +16,8 @@ export interface GitHubPort {
   getTree(repo: string, commitSha: string): Promise<Map<string, string>>;
   readTextFile(repo: string, ref: string, path: string): Promise<string | null>;
   createBranch(repo: string, name: string, fromSha: string): Promise<void>;
-  commitFiles(repo: string, input: { branch: string; parentSha: string; message: string; changes: FileChange[] }): Promise<string>;
+  /** `replaceRoot`: replace the branch's first commit (GitHub's auto_init commit) instead of building on it. */
+  commitFiles(repo: string, input: { branch: string; parentSha: string; message: string; changes: FileChange[]; replaceRoot?: boolean }): Promise<string>;
   listCommits(repo: string, branch: string, page: number): Promise<CommitInfo[]>;
   compare(repo: string, base: string, head: string): Promise<{ status: "identical" | "ahead" | "behind" | "diverged"; aheadBy: number; behindBy: number; commits: CommitInfo[] }>;
 }
