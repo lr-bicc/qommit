@@ -37,6 +37,18 @@ export class FlowError extends Error {
   }
 }
 
+/**
+ * Marks the repository with the Qommit topic so that it is listed for "Connect to existing repository".
+ * Best effort: setting topics needs the admin role on the repository, and its absence must not fail the action.
+ */
+export async function markRepository(github: GitHubPort, repo: string): Promise<void> {
+  try {
+    await github.markRepo(repo);
+  } catch {
+    // The repository stays usable; it is only missing from the filtered list.
+  }
+}
+
 export function cacheKey(info: AppInfo): string {
   return info.url;
 }

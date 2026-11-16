@@ -2,6 +2,7 @@ import type { FileContent } from "../core/types";
 import { GitHubError } from "./errors";
 import type { GitHubClient } from "./client";
 import type { RepoRef } from "./snapshot";
+import { QOMMIT_TOPIC } from "../core/repo-layout";
 
 export interface CommitInfo { sha: string; message: string; author: string; date: string }
 export interface TagInfo { name: string; sha: string }
@@ -174,6 +175,13 @@ export async function getRepo(c: GitHubClient, repo: string): Promise<RepoRef | 
     if (e instanceof GitHubError && e.kind === "not-found") return null;
     throw e;
   }
+}
+
+/** Adds the Qommit topic to the repository, keeping its other topics. Writes nothing when it is already set. */
+export async function markRepo(c: GitHubClient, repo: string): Promise<void> {
+  const { names } = await c.rest<{ names: string[] }>("GET", `/repos/${repo}/topics`);
+  if (names.includes(QOMMIT_TOPIC)) return;
+  await c.rest("PUT", `/repos/${repo}/topics`, { names: [...names, QOMMIT_TOPIC] });
 }
 
 /** Reads a text file at `ref`; null when it does not exist. Decodes Base64 without Buffer. */

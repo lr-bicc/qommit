@@ -303,3 +303,35 @@ test("suggestBranchName", () => {
   expect(suggestBranchName("Jörg Müller")).toBe("j-rg-m-ller");
   expect(suggestBranchName("")).toBe("branch");
 });
+
+test("create repository, connect and create branch mark the repository with the qommit topic", async () => {
+  const created = fakePorts();
+  const link = await createRepository(created.ports, {});
+  expect(created.github.isMarked(link.repo)).toBe(true);
+
+  for (const mode of ["new-branch", "existing-branch"] as const) {
+    const { ports, github } = fakePorts();
+    legacyRepo(github);
+    await connectRepository(ports, { repo: "lr-bicc/sales", mode, branch: mode === "new-branch" ? "r.vasilev" : "main" });
+    expect(github.isMarked("lr-bicc/sales")).toBe(true);
+  }
+
+  const copy = fakePorts();
+  const first = legacyRepo(copy.github);
+  await createBranchForCopy(copy.ports, { source: { repo: "lr-bicc/sales", branch: "main", syncedSha: first }, name: "feature/x", fromSource: false });
+  expect(copy.github.isMarked("lr-bicc/sales")).toBe(true);
+});
+
+test("a repository that cannot be marked (no admin role) does not fail the flows", async () => {
+  const created = fakePorts();
+  created.github.failMarking();
+  const link = await createRepository(created.ports, {});
+  expect(created.app.link).toEqual(link);
+  expect(created.github.isMarked(link.repo)).toBe(false);
+
+  const { ports, github, app } = fakePorts();
+  legacyRepo(github);
+  github.failMarking();
+  const connected = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "new-branch", branch: "r.vasilev" });
+  expect(app.link).toEqual(connected);
+});

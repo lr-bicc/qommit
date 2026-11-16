@@ -1,9 +1,11 @@
 import { unzipSync } from "fflate";
 import type { FileMap } from "../core/types";
-import { findBranchForApp, parseBranchTable } from "../core/repo-layout";
+import { QOMMIT_TOPIC, findBranchForApp, parseBranchTable } from "../core/repo-layout";
 import type { GitHubClient } from "./client";
 
 export interface RepoRef { repo: string; defaultBranch: string }
+/** A repository of the organisation; `marked` when it carries the Qommit topic. */
+export interface OrgRepo extends RepoRef { marked: boolean }
 
 /** Downloads the repository state at `sha` as one ZIP and returns it as a FileMap. */
 export async function downloadSnapshot(c: GitHubClient, repo: string, sha: string): Promise<FileMap> {
@@ -34,6 +36,7 @@ const ORG_REPOS_QUERY = `query($org: String!, $cursor: String) {
         nameWithOwner
         defaultBranchRef { name }
         object(expression: "HEAD:README.md") { ... on Blob { text } }
+        repositoryTopics(first: 20) { nodes { topic { name } } }
       }
     }
   }
@@ -43,6 +46,7 @@ interface RepoNode {
   nameWithOwner: string;
   defaultBranchRef: { name: string } | null;
   object: { text?: string } | null;
+  repositoryTopics?: { nodes: ({ topic: { name: string } } | null)[] } | null;
 }
 interface OrgReposResponse {
   organization: { repositories: {
@@ -63,10 +67,12 @@ async function* orgRepoNodes(c: GitHubClient, org: string): AsyncGenerator<RepoN
 }
 
 /** Lists the organisation's repositories that have a default branch. */
-export async function listOrgRepos(c: GitHubClient, org: string): Promise<RepoRef[]> {
-  const out: RepoRef[] = [];
+export async function listOrgRepos(c: GitHubClient, org: string): Promise<OrgRepo[]> {
+  const out: OrgRepo[] = [];
   for await (const n of orgRepoNodes(c, org)) {
-    if (n.defaultBranchRef) out.push({ repo: n.nameWithOwner, defaultBranch: n.defaultBranchRef.name });
+    if (!n.defaultBranchRef) continue;
+    const marked = (n.repositoryTopics?.nodes ?? []).some((t) => t?.topic.name === QOMMIT_TOPIC);
+    out.push({ repo: n.nameWithOwner, defaultBranch: n.defaultBranchRef.name, marked });
   }
   return out;
 }

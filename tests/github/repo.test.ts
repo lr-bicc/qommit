@@ -1,4 +1,4 @@
-import { commitFiles, getTree, getBranchSha, createBranch, compare, createTag, isValidRefName, listBranches, listTags, listCommits, getRepo, readTextFile, whoAmI } from "../../src/github/repo";
+import { commitFiles, getTree, getBranchSha, createBranch, compare, createTag, isValidRefName, listBranches, listTags, listCommits, getRepo, markRepo, readTextFile, whoAmI } from "../../src/github/repo";
 import { createGitHubClient } from "../../src/github/client";
 import { mockFetch } from "./mock-fetch";
 const R = "/repos/lr-bicc/demo";
@@ -248,4 +248,18 @@ test("whoAmI returns the login", async () => {
   const m = mockFetch({ ["GET /user"]: () => ({ body: { login: "octocat", id: 1 } }) });
   const c = createGitHubClient({ token: "t", fetch: m.fetch });
   expect(await whoAmI(c)).toEqual({ login: "octocat" });
+});
+
+test("markRepo adds the qommit topic and keeps the existing ones", async () => {
+  const m = mockFetch({
+    [`GET ${R}/topics`]: () => ({ body: { names: ["qlik", "finance"] } }),
+    [`PUT ${R}/topics`]: (req) => ({ body: req.body }),
+  });
+  await markRepo(createGitHubClient({ token: "t", fetch: m.fetch }), "lr-bicc/demo");
+  expect(m.calls.find((x) => x.method === "PUT")!.body).toEqual({ names: ["qlik", "finance", "qommit"] });
+});
+test("markRepo writes nothing when the topic is already set", async () => {
+  const m = mockFetch({ [`GET ${R}/topics`]: () => ({ body: { names: ["qommit"] } }) });
+  await markRepo(createGitHubClient({ token: "t", fetch: m.fetch }), "lr-bicc/demo");
+  expect(m.calls.map((x) => x.method)).toEqual(["GET"]);
 });

@@ -22,6 +22,9 @@ function normalizeSlug(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** GitHub topic that marks a repository as a Qlik app repository maintained with Qommit. */
+export const QOMMIT_TOPIC = "qommit";
+
 export function repoSlug(appName: string, prefix = ""): string {
   const base = normalizeSlug(appName) || "app";
   return normalizeSlug(prefix + base).slice(0, MAX_SLUG_LENGTH).replace(/-+$/, "");

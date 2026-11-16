@@ -1,8 +1,8 @@
 # Design: Qommit – Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
 - **Name des Tools:** Qommit (Paket- und Repo-Name `qommit`, Repo `lr-bicc/qommit`)
-- **Datum:** 2026-11-15 (Revision 10)
-- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12).
+- **Datum:** 2026-11-16 (Revision 11)
+- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12), Revision 11 die Änderungen aus der Abnahme von Plan 2 (Abschnitt 13).
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
 - **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
 
@@ -95,6 +95,8 @@ TypeScript, Manifest V3, esbuild, Preact (Side Panel und Optionsseite), enigma.j
 ### 4.1 Benennung
 Repo-Name = App-Name als Slug (Kleinbuchstaben, Umlaute transliteriert, alles außer `a-z0-9` → `-`, mehrfache `-` zusammengefasst, max. 80 Zeichen), optional mit Präfix aus den Optionen. Beispiel: „Supply Chain Performance“ → `supply-chain-performance`. Bei Kollision werden `-<erste 8 Zeichen der App-ID>` angehängt. Repos werden **privat**, mit Default-Branch `main` und mit `auto_init: true` angelegt, weil die Git Data API auf einem leeren Repo mit `409` antwortet.
 
+**Kennzeichen:** Repos, die mit Qommit gepflegt werden, tragen das GitHub-Topic `qommit`. Die Extension setzt es beim Anlegen eines Repos und bei jedem Create Branch, Connect und Save changes; vorhandene Topics bleiben erhalten. Das Setzen braucht die Admin-Rolle am Repo; fehlt sie, läuft die Aktion trotzdem, das Repo fehlt dann nur in der gefilterten Liste (6.2). Das Topic hängt am Repo, nicht am Inhalt; Dateien und Repo-Format bleiben unverändert. Die 29 gitoqlok-Repos der Org wurden am 2026-11-16 einmalig markiert.
+
 ### 4.2 Dateistruktur (wie gitoqlok)
 ```
 README.md                         Titel, Ersteller, Sheet-Tabelle, Branch-Tabelle
@@ -180,7 +182,7 @@ Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (na
 ### 6.2 App ohne Repo
 Das Panel zeigt „No linked repository“ mit zwei Aktionen:
 - **Create repository:** legt das Repo an (4.1), erzeugt `README.md`, committet den App-Stand als ersten Commit auf `main` und legt das Link-Objekt an.
-- **Connect to existing repository:** Dialog wie bei gitoqlok mit filterbarer Repo-Liste der Org und der Wahl „As a new branch“ (Name vorbelegt mit dem Qlik-Benutzernamen, abgezweigt vom Default-Branch) oder „To existing branch“ (Auswahlliste). Die App wird dem Branch zugeordnet (Link-Objekt, Zeile in der Branch-Tabelle). `syncedSha` wird auf den Branch-HEAD gesetzt; Unterschiede erscheinen als lokale Änderungen.
+- **Connect to existing repository:** Dialog wie bei gitoqlok mit filterbarer Repo-Liste der Org. Die Liste zeigt nur Repos mit dem Topic `qommit` (4.1); das Häkchen „Show all repositories“ zeigt alle Repos der Org, etwa ein leeres Repo, das ein Admin angelegt hat. Danach die Wahl „As a new branch“ (Name vorbelegt mit dem Qlik-Benutzernamen, abgezweigt vom Default-Branch) oder „To existing branch“ (Auswahlliste). Die App wird dem Branch zugeordnet (Link-Objekt, Zeile in der Branch-Tabelle). `syncedSha` wird auf den Branch-HEAD gesetzt; Unterschiede erscheinen als lokale Änderungen.
 
 ### 6.3 Kopie einer versionierten App: Create Branch
 Das Panel meldet „We found a repository for the master Qlik application, from which current application was duplicated“ und bietet **Create Branch**, **Unlink Repository** und **Connect to existing repository** an.
@@ -324,3 +326,10 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 6.5 | Das Ladeskript wird als Ganzes gespeichert. „Commit anyway“ nur per eigenem Klick. | Ein Tab ohne passende `tab_order.txt` ergibt einen ungültigen Stand. |
 | 6.5 | Textdateien gehen im Tree-Aufruf mit statt als einzelne Blobs. | Der erste Commit der Referenz-App hätte rund 440 Aufrufe gebraucht und GitHubs sekundäres Limit riskiert. |
 | 7 | Zeitgrenzen für Qlik-Aufrufe; Lesefehler nennen das Objekt. | Ein hängender Aufruf hätte das Panel bis zum Neuladen der Seite gesperrt. |
+
+## 13. Änderungen in Revision 11 (aus der Abnahme von Plan 2)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 4.1, 6.2 | Repos tragen das Topic `qommit`; „Connect to existing repository“ listet nur solche Repos, „Show all repositories“ zeigt alle. | Die Liste zeigte jedes Repo der Org, auch Repos ohne Bezug zu Qlik-Apps. Die Branch-Tabelle der README als Merkmal wäre ein Format von gitoqlok im Inhalt des Default-Branches gewesen; das Topic ist eindeutig, stabil und unabhängig von Commits. |
+| 5 | Nennen gitoqloks Angaben ein Repo der Org, das GitHub nicht zeigt (gelöscht oder ohne Zugriff des Tokens), meldet das Panel „Repository not found or no access.“ statt „No linked repository“. Repos außerhalb der Org werden weiter ignoriert. | Eine frische Kopie von „Supply Chain Performance“ erschien als nicht verknüpft, weil der Token das Repo nicht sah; die Ursache war im Panel nicht erkennbar. |

@@ -42,6 +42,17 @@ test("the repository pager stops when GitHub sends no end cursor", async () => {
     return { organization: { repositories: { pageInfo: { hasNextPage: true, endCursor: null },
       nodes: [{ nameWithOwner: "lr-bicc/demo", defaultBranchRef: { name: "main" }, object: null }] } } };
   }) as GitHubClient["graphql"] });
-  expect(await listOrgRepos(c, "lr-bicc")).toEqual([{ repo: "lr-bicc/demo", defaultBranch: "main" }]);
+  expect(await listOrgRepos(c, "lr-bicc")).toEqual([{ repo: "lr-bicc/demo", defaultBranch: "main", marked: false }]);
   expect(calls).toBe(1);
+});
+test("listOrgRepos tells which repositories carry the qommit topic", async () => {
+  const c = fake({ graphql: (async () => ({ organization: { repositories: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [
+    { nameWithOwner: "lr-bicc/sales", defaultBranchRef: { name: "main" }, object: null, repositoryTopics: { nodes: [{ topic: { name: "finance" } }, { topic: { name: "qommit" } }] } },
+    { nameWithOwner: "lr-bicc/pyrunner", defaultBranchRef: { name: "main" }, object: null, repositoryTopics: { nodes: [] } },
+    { nameWithOwner: "lr-bicc/empty", defaultBranchRef: null, object: null, repositoryTopics: { nodes: [] } },
+  ] } } })) as GitHubClient["graphql"] });
+  expect(await listOrgRepos(c, "lr-bicc")).toEqual([
+    { repo: "lr-bicc/sales", defaultBranch: "main", marked: true },
+    { repo: "lr-bicc/pyrunner", defaultBranch: "main", marked: false },
+  ]);
 });

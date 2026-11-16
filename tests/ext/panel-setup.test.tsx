@@ -228,7 +228,7 @@ test("duplicated explains the situation", async () => {
 test("the connect dialog filters repositories and connects to an existing branch", async () => {
   const bridge = fakeBridge({
     status: [view({ state: "unlinked" }), view(LINKED)],
-    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }, { repo: "lr-bicc/finance", defaultBranch: "main" }]],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main", marked: true }, { repo: "lr-bicc/finance", defaultBranch: "main", marked: true }]],
     listBranches: [{ defaultBranch: "main", branches: ["main", "dev"] }],
     connect: [LINK],
   });
@@ -251,7 +251,7 @@ test("the connect dialog filters repositories and connects to an existing branch
 test("the connect dialog defaults to a new branch with the suggested name", async () => {
   const bridge = fakeBridge({
     status: [view({ state: "unlinked" }), view(LINKED)],
-    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main", marked: true }]],
     listBranches: [{ defaultBranch: "main", branches: ["main"] }],
     connect: [new BridgeError({ code: "branch-exists", message: "x" })],
   });
@@ -284,7 +284,7 @@ function holdCommand(bridge: FakeBridge, cmd: string): { release(): void } {
 test("Retry in the connect dialog loads the repository list again", async () => {
   const bridge = fakeBridge({
     status: [view({ state: "unlinked" })],
-    listRepos: [net(), [{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listRepos: [net(), [{ repo: "lr-bicc/sales", defaultBranch: "main", marked: true }]],
   });
   render(<App bridge={bridge} />);
   fireEvent.click(await screen.findByText("Connect to existing repository"));
@@ -298,7 +298,7 @@ test("Retry in the connect dialog loads the repository list again", async () => 
 test("Retry in the connect dialog loads the branches of the chosen repository again", async () => {
   const bridge = fakeBridge({
     status: [view({ state: "unlinked" })],
-    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main", marked: true }]],
     listBranches: [net(), { defaultBranch: "main", branches: ["main"] }],
   });
   render(<App bridge={bridge} />);
@@ -316,7 +316,7 @@ test("Retry in the connect dialog loads the branches of the chosen repository ag
 test("Retry after a failed connect submits again", async () => {
   const bridge = fakeBridge({
     status: [view({ state: "unlinked" }), view(LINKED)],
-    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main", marked: true }]],
     listBranches: [{ defaultBranch: "main", branches: ["main"] }],
     connect: [net(), LINK],
   });
@@ -392,7 +392,7 @@ test("two immediate clicks on the dialog's Create Branch send one command", asyn
 test("two immediate clicks on Connect send one command", async () => {
   const bridge = fakeBridge({
     status: [view({ state: "unlinked" }), view(LINKED)],
-    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main" }]],
+    listRepos: [[{ repo: "lr-bicc/sales", defaultBranch: "main", marked: true }]],
     listBranches: [{ defaultBranch: "main", branches: ["main"] }],
     connect: [LINK],
   });
@@ -464,4 +464,25 @@ describe("the panel follows its tab", () => {
     fireEvent.click(screen.getByText("Refresh"));
     await waitFor(() => expect(bridge.commands.filter((c) => c.cmd === "status")).toHaveLength(2));
   });
+});
+
+test("the connect dialog lists only Qommit repositories until Show all repositories is ticked", async () => {
+  const bridge = fakeBridge({
+    status: [view({ state: "unlinked" })],
+    listRepos: [[
+      { repo: "lr-bicc/sales", defaultBranch: "main", marked: true },
+      { repo: "lr-bicc/pyrunner", defaultBranch: "main", marked: false },
+    ]],
+  });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Connect to existing repository"));
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByText("lr-bicc/sales");
+  expect(within(dialog).queryByText("lr-bicc/pyrunner")).toBeNull();
+  const showAll = within(dialog).getByLabelText("Show all repositories") as HTMLInputElement;
+  expect(showAll.checked).toBe(false);
+  fireEvent.click(showAll);
+  await within(dialog).findByText("lr-bicc/pyrunner");
+  expect(within(dialog).getByText("lr-bicc/sales")).toBeTruthy();
+  expect(bridge.commands.filter((c) => c.cmd === "listRepos")).toHaveLength(1); // ticking filters, it does not reload
 });

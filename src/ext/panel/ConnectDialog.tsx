@@ -5,12 +5,14 @@ import { toCommandError, type DialogProps } from "./CreateBranchDialog";
 import { Dialog } from "./Dialog";
 import { ErrorMessage } from "./ErrorMessage";
 
-interface RepoRef { repo: string; defaultBranch: string }
+/** `marked`: the repository carries the Qommit topic. */
+interface RepoRef { repo: string; defaultBranch: string; marked: boolean }
 interface Branches { defaultBranch: string; branches: string[] }
 
 export function ConnectDialog(props: DialogProps & { suggestedBranch: string }): JSX.Element {
   const [repos, setRepos] = useState<RepoRef[] | null>(null);
   const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const [repo, setRepo] = useState<string | null>(null);
   const [branches, setBranches] = useState<Branches | null>(null);
   const [mode, setMode] = useState<"new-branch" | "existing-branch">("new-branch");
@@ -56,7 +58,8 @@ export function ConnectDialog(props: DialogProps & { suggestedBranch: string }):
   }
 
   const needle = search.trim().toLowerCase();
-  const shown = (repos ?? []).filter((r) => r.repo.toLowerCase().includes(needle));
+  // Only Qommit repositories by default; "Show all" reveals the rest, e.g. an empty repository an admin created.
+  const shown = (repos ?? []).filter((r) => (showAll || r.marked) && r.repo.toLowerCase().includes(needle));
   const ready = repo !== null && branches !== null && (mode === "existing-branch" ? existing !== "" : newName.trim() !== "");
 
   return (
@@ -64,6 +67,10 @@ export function ConnectDialog(props: DialogProps & { suggestedBranch: string }):
       <form onSubmit={submit}>
         {error && <ErrorMessage error={error.error} onOptions={props.onOptions} onRetry={error.retry} disabled={props.busy} />}
         <input type="search" placeholder="Search repositories" aria-label="Search repositories" value={search} onInput={(e) => setSearch(e.currentTarget.value)} />
+        <label class="check">
+          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.currentTarget.checked)} />
+          <span>Show all repositories</span>
+        </label>
         <ul class="repo-list">
           {repos === null && <li class="muted">Loading…</li>}
           {repos !== null && shown.length === 0 && <li class="muted">No repositories found.</li>}

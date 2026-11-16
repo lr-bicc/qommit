@@ -233,3 +233,14 @@ test("progress of reading the app is forwarded", async () => {
   await commitChanges(ports, input(link), (d, t) => calls.push([d, t]));
   expect(calls).toEqual([[1, 1]]);
 });
+
+test("save changes marks the repository; a failing mark does not fail the commit", async () => {
+  const { ports, github, link } = await linked();
+  await commitChanges(ports, input(link));
+  expect(github.isMarked(link.repo)).toBe(true);
+
+  const other = await linked();
+  other.github.failMarking();
+  const result = await commitChanges(other.ports, input(other.link));
+  expect(result).toHaveProperty("sha");
+});

@@ -79,7 +79,7 @@ test("org-level operations use the org from the options", async () => {
     "GET /user": () => ({ body: { login: "rumen" } }),
   });
   expect(await port.whoAmI()).toEqual({ login: "rumen" });
-  expect(await port.listOrgRepos()).toEqual([{ repo: "lr-bicc/x", defaultBranch: "main" }]);
+  expect(await port.listOrgRepos()).toEqual([{ repo: "lr-bicc/x", defaultBranch: "main", marked: false }]);
 });
 
 test("a 401 becomes a GatewayError without the token", async () => {
@@ -175,4 +175,15 @@ test("an answer of the service worker that is not a result is an internal Gatewa
     expect(err).toBeInstanceOf(GatewayError);
     expect(err).toMatchObject({ kind: "internal", message: "The extension's background service did not answer. Try again." });
   }
+});
+
+test("markRepo sets the fixed qommit topic, only for repositories of the organisation", async () => {
+  const { m, port } = setup({
+    "GET /repos/lr-bicc/app/topics": () => ({ body: { names: [] } }),
+    "PUT /repos/lr-bicc/app/topics": (req) => ({ body: req.body }),
+  });
+  await port.markRepo("lr-bicc/app");
+  expect(m.calls.find((c) => c.method === "PUT")!.body).toEqual({ names: ["qommit"] });
+  await expect(port.markRepo("other-org/app")).rejects.toMatchObject({ kind: "not-allowed" });
+  expect(m.calls.filter((c) => c.url.includes("other-org")).length).toBe(0);
 });

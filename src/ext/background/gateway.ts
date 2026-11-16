@@ -56,6 +56,7 @@ const OPS: Record<keyof GitHubPort, OpSpec> = {
   findRepoForApp: { strings: 1, run: (c, org, [appId]) => snapshotApi.findRepoForApp(c, org, appId as string) },
   createRepo: { strings: 1, run: (c, org, [name]) => snapshotApi.createRepo(c, org, name as string) },
   getRepo: { strings: 1, repo: true, run: (c, _o, [r]) => repoApi.getRepo(c, r as string) },
+  markRepo: { strings: 1, repo: true, run: async (c, _o, [r]) => { await repoApi.markRepo(c, r as string); return null; } },
   getBranchSha: { strings: 2, repo: true, run: (c, _o, [r, b]) => repoApi.getBranchSha(c, r as string, b as string) },
   listBranches: { strings: 1, repo: true, run: (c, _o, [r]) => repoApi.listBranches(c, r as string) },
   getTree: {

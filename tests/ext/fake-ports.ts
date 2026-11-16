@@ -36,8 +36,12 @@ export function fakeGitHub(): GitHubPort & {
   protect(repo: string, branch: string): void;
   raceOnce(repo: string): void;
   deleteBranch(repo: string, branch: string): void;
+  isMarked(repo: string): boolean;
+  failMarking(): void;
 } {
   const repos = new Map<string, FakeRepo>();
+  const marked = new Set<string>();
+  let markingFails = false;
   let counter = 0;
 
   const newSha = (): string => "c0de".repeat(8) + (++counter).toString(16).padStart(8, "0");
@@ -100,10 +104,17 @@ export function fakeGitHub(): GitHubPort & {
     protect: (repo, branch) => void repoOf(repo).protectedBranches.add(branch),
     raceOnce: (repo) => { repoOf(repo).race = true; },
     deleteBranch: (repo, branch) => void repoOf(repo).branches.delete(branch),
+    isMarked: (repo) => marked.has(repo),
+    failMarking: () => { markingFails = true; },
 
     async whoAmI() { return { login: "octocat" }; },
     async listOrgRepos() {
-      return [...repos].filter(([n]) => n.startsWith(`${ORG}/`)).map(([repo, r]) => ({ repo, defaultBranch: r.defaultBranch }));
+      return [...repos].filter(([n]) => n.startsWith(`${ORG}/`)).map(([repo, r]) => ({ repo, defaultBranch: r.defaultBranch, marked: marked.has(repo) }));
+    },
+    async markRepo(repo) {
+      repoOf(repo);
+      if (markingFails) throw new GatewayError("forbidden", "Resource not accessible by personal access token");
+      marked.add(repo);
     },
     async findRepoForApp(appId) {
       for (const [repo, r] of repos) {

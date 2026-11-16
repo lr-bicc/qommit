@@ -230,7 +230,7 @@ test("history needs a linked app", async () => {
 test("listRepos and listBranches", async () => {
   const { run, github } = setup();
   github.seed("lr-bicc/a", new Map([["README.md", "x"]]));
-  expect(await run({ cmd: "listRepos" })).toEqual({ ok: true, value: [{ repo: "lr-bicc/a", defaultBranch: "main" }] });
+  expect(await run({ cmd: "listRepos" })).toEqual({ ok: true, value: [{ repo: "lr-bicc/a", defaultBranch: "main", marked: false }] });
   expect(await run({ cmd: "listBranches", repo: "lr-bicc/a" })).toEqual({ ok: true, value: { defaultBranch: "main", branches: ["main"] } });
   expect(await run({ cmd: "listBranches", repo: "lr-bicc/nope" })).toMatchObject({ ok: false, error: { code: "repo-not-found" } });
 });

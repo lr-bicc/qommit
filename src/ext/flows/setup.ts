@@ -4,7 +4,7 @@ import type { FileChange } from "../../github/repo";
 import { isValidRefName } from "../../github/repo";
 import type { LinkData } from "../../qlik/link";
 import { GatewayError, type GitHubPort } from "../shared/github-port";
-import { FlowError, cacheKey, isAncestor, saveLink, type AppInfo, type FlowPorts } from "./ports";
+import { FlowError, cacheKey, isAncestor, saveLink, type AppInfo, type FlowPorts, markRepository } from "./ports";
 import type { CopySource } from "./status";
 
 const TABLE_COMMIT_MESSAGE = "Update branches table";
@@ -118,6 +118,7 @@ export async function createRepository(ports: FlowPorts, input: { name?: string 
     throw e;
   }
   const { repo, defaultBranch } = created;
+  await markRepository(github, repo);
   const readme = createReadme({
     appTitle: info.title, creatorLogin: login, createdAt: ports.now(),
     sheets: sheetsOf(snapshot), defaultBranch, appUrl: info.url,
@@ -171,6 +172,7 @@ export async function connectRepository(
   }
   const link: LinkData = { repo, branch, appId: info.id, syncedSha };
   await saveLink(ports, link);
+  await markRepository(github, repo);
   return link;
 }
 
@@ -190,6 +192,7 @@ export async function createBranchForCopy(
   const keep = source.syncedSha !== null && (await isAncestor(github, source.repo, source.syncedSha, head));
   const link: LinkData = { repo: source.repo, branch: name, appId: info.id, syncedSha: keep ? source.syncedSha! : head };
   await saveLink(ports, link);
+  await markRepository(github, source.repo);
   return link;
 }
 

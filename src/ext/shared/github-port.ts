@@ -1,14 +1,16 @@
 import type { CommitInfo, FileChange } from "../../github/repo";
 import type { GitHubErrorKind } from "../../github/errors";
-import type { RepoRef } from "../../github/snapshot";
+import type { OrgRepo, RepoRef } from "../../github/snapshot";
 import { toWire, type WireContent } from "./wire";
 
 export interface GitHubPort {
   whoAmI(): Promise<{ login: string }>;
-  listOrgRepos(): Promise<RepoRef[]>;
+  listOrgRepos(): Promise<OrgRepo[]>;
   findRepoForApp(appId: string): Promise<{ repo: string; branch: string } | null>;
   getRepo(repo: string): Promise<RepoRef | null>;
   createRepo(name: string): Promise<RepoRef>;
+  /** Adds the Qommit topic to an organisation repository. */
+  markRepo(repo: string): Promise<void>;
   getBranchSha(repo: string, branch: string): Promise<string | null>;
   listBranches(repo: string): Promise<{ name: string; sha: string }[]>;
   getTree(repo: string, commitSha: string): Promise<Map<string, string>>;
@@ -52,10 +54,11 @@ export function createGitHubPort(send: (request: GatewayRequest) => Promise<Gate
   }
   return {
     whoAmI: () => call("whoAmI") as Promise<{ login: string }>,
-    listOrgRepos: () => call("listOrgRepos") as Promise<RepoRef[]>,
+    listOrgRepos: () => call("listOrgRepos") as Promise<OrgRepo[]>,
     findRepoForApp: (appId) => call("findRepoForApp", appId) as Promise<{ repo: string; branch: string } | null>,
     getRepo: (repo) => call("getRepo", repo) as Promise<RepoRef | null>,
     createRepo: (name) => call("createRepo", name) as Promise<RepoRef>,
+    markRepo: async (repo) => void (await call("markRepo", repo)),
     getBranchSha: (repo, branch) => call("getBranchSha", repo, branch) as Promise<string | null>,
     listBranches: (repo) => call("listBranches", repo) as Promise<{ name: string; sha: string }[]>,
     getTree: async (repo, commitSha) => new Map((await call("getTree", repo, commitSha)) as [string, string][]),

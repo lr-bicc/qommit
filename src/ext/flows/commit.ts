@@ -3,7 +3,7 @@ import type { CommitInfo, FileChange } from "../../github/repo";
 import type { LinkData } from "../../qlik/link";
 import { GatewayError } from "../shared/github-port";
 import { buildLocalFiles, hashFiles, unmaintainedPaths } from "./local-changes";
-import { FlowError, sameMaintainedTree, saveLink, type FlowPorts } from "./ports";
+import { FlowError, sameMaintainedTree, saveLink, type FlowPorts, markRepository } from "./ports";
 
 const SCRIPT_DIR = "data_load_script/";
 
@@ -72,6 +72,7 @@ export async function commitChanges(
     throw e;
   }
   await saveLink(ports, { ...link, syncedSha: sha });
+  await markRepository(ports.github, link.repo);
   return { sha };
 }
 
