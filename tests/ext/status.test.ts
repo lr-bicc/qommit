@@ -1,6 +1,7 @@
 import { createReadme, upsertBranchRow } from "../../src/core/repo-layout";
+import { serializeApp } from "../../src/core/serializer";
 import { resolveStatus } from "../../src/ext/flows/status";
-import { APP_ID, CANON_ID } from "../fixtures/snapshot";
+import { APP_ID, CANON_ID, makeSnapshot } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
 
 const REPO = "lr-bicc/sales";
@@ -185,4 +186,33 @@ describe("resolveStatus", () => {
     expect(s).toMatchObject({ state: "linked", stored: "local" });
     expect(cache.entries.get(urlFor(APP_ID))).toEqual({ repo: REPO, branch: "main", appId: APP_ID, syncedSha: first });
   });
+
+  describe("app found in the table, gitoqlok's last commit lags behind a merge", () => {
+    const SHEET = "objects/sheets/sh-1.json";
+    async function lagging(appHasMerge: boolean) {
+      const { ports, github, app } = setup({ meta: { repo: REPO, lastCommitId: null } });
+      const old = makeSnapshot();
+      const merged = makeSnapshot();
+      merged.sheets[0]!.qProperty.qMetaDef = { title: "Overview (Nordics)" };
+      const oldFiles = serializeApp(old, { canonicalAppId: CANON_ID });
+      const c1 = await github.commitFiles(REPO, { branch: "main", parentSha: github.head(REPO, "main"), message: "app",
+        changes: [...oldFiles].map(([path, content]) => ({ path, content })) });
+      const c2 = await github.commitFiles(REPO, { branch: "main", parentSha: c1, message: "Merge pull request #31",
+        changes: [{ path: SHEET, content: serializeApp(merged, { canonicalAppId: CANON_ID }).get(SHEET)! }] });
+      app.meta = { repo: REPO, lastCommitId: c1 };
+      if (appHasMerge) app.snapshot = merged;
+      return { status: await resolveStatus(ports), c1, c2 };
+    }
+
+    it("the app already holds the merge -> linked at the head, nothing behind", async () => {
+      const { status, c2 } = await lagging(true);
+      expect(status).toMatchObject({ state: "linked", behindBy: 0, link: { branch: "main", syncedSha: c2 } });
+    });
+
+    it("the app is really older -> linked at gitoqlok's commit, one behind", async () => {
+      const { status, c1 } = await lagging(false);
+      expect(status).toMatchObject({ state: "linked", behindBy: 1, link: { branch: "main", syncedSha: c1 } });
+    });
+  });
 });
+

@@ -1,8 +1,9 @@
 import { parseBranchTable, upsertBranchRow } from "../../src/core/repo-layout";
+import { serializeApp } from "../../src/core/serializer";
 import { FlowError } from "../../src/ext/flows/ports";
 import { resolveStatus } from "../../src/ext/flows/status";
 import { connectRepository, createBranchForCopy, createRepository, suggestBranchName, unlinkApp } from "../../src/ext/flows/setup";
-import { APP_ID, CANON_ID } from "../fixtures/snapshot";
+import { APP_ID, CANON_ID, makeSnapshot } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
 import { legacyRepo } from "./helpers";
 
@@ -334,4 +335,30 @@ test("a repository that cannot be marked (no admin role) does not fail the flows
   github.failMarking();
   const connected = await connectRepository(ports, { repo: "lr-bicc/sales", mode: "new-branch", branch: "r.vasilev" });
   expect(app.link).toEqual(connected);
+});
+
+describe("create branch for a copy whose recorded commit lags behind (gitoqlok)", () => {
+  const SHEET = "objects/sheets/sh-1.json";
+  const GITOQLOK_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  async function lagging(appHasMerge: boolean) {
+    const { ports, github, app } = fakePorts();
+    const first = legacyRepo(github);
+    const merged = makeSnapshot();
+    merged.sheets[0]!.qProperty.qMetaDef = { title: "Overview (Nordics)" };
+    await github.commitFiles("lr-bicc/sales", { branch: "main", parentSha: first, message: "Merge pull request #31",
+      changes: [{ path: SHEET, content: serializeApp(merged, { canonicalAppId: GITOQLOK_ID }).get(SHEET)! }] });
+    if (appHasMerge) app.snapshot = merged;
+    const link = await createBranchForCopy(ports, { source: { repo: "lr-bicc/sales", branch: null, syncedSha: first }, name: "feature/x", fromSource: false });
+    return { link, head: github.head("lr-bicc/sales", "feature/x"), first };
+  }
+
+  test("the app already holds the merge: the copy starts at the head", async () => {
+    const { link, head } = await lagging(true);
+    expect(link.syncedSha).toBe(head);
+  });
+
+  test("the app is really older: the recorded commit is kept", async () => {
+    const { link, first } = await lagging(false);
+    expect(link.syncedSha).toBe(first);
+  });
 });

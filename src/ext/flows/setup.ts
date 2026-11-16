@@ -4,6 +4,7 @@ import type { FileChange } from "../../github/repo";
 import { isValidRefName } from "../../github/repo";
 import type { LinkData } from "../../qlik/link";
 import { GatewayError, type GitHubPort } from "../shared/github-port";
+import { startingCommit } from "./adopt";
 import { FlowError, cacheKey, isAncestor, saveLink, type AppInfo, type FlowPorts, markRepository } from "./ports";
 import type { CopySource } from "./status";
 
@@ -190,7 +191,8 @@ export async function createBranchForCopy(
 
   const head = await createBranchWithRow(ports, source.repo, defaultBranch, name, info.url, base);
   const keep = source.syncedSha !== null && (await isAncestor(github, source.repo, source.syncedSha, head));
-  const link: LinkData = { repo: source.repo, branch: name, appId: info.id, syncedSha: keep ? source.syncedSha! : head };
+  const syncedSha = keep ? await startingCommit(ports, source.repo, source.syncedSha!, head) : head;
+  const link: LinkData = { repo: source.repo, branch: name, appId: info.id, syncedSha };
   await saveLink(ports, link);
   await markRepository(github, source.repo);
   return link;

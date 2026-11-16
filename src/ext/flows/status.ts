@@ -1,6 +1,7 @@
 import { findBranchForApp, parseBranchTable } from "../../core/repo-layout";
 import type { LinkData } from "../../qlik/link";
 import { GatewayError } from "../shared/github-port";
+import { startingCommit } from "./adopt";
 import type { GitHubPort } from "../shared/github-port";
 import { cacheKey, isAncestor, sameMaintainedTree, saveLink, type FlowPorts } from "./ports";
 
@@ -114,7 +115,9 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
         defaultBranch: repo.defaultBranch,
       };
     }
-    const syncedSha = lastCommitId !== null && (await isAncestor(github, hit.repo, lastCommitId, head)) ? lastCommitId : head;
+    const syncedSha = lastCommitId !== null && (await isAncestor(github, hit.repo, lastCommitId, head))
+      ? await startingCommit(ports, hit.repo, lastCommitId, head) // gitoqlok's last commit can lag behind a merge
+      : head;
     const found: LinkData = { repo: hit.repo, branch: hit.branch, appId: info.id, syncedSha };
     const stored = await saveLink(ports, found);
     return resolveLinked(ports, found, stored);
