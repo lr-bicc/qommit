@@ -35,6 +35,18 @@ async function linkedRepo(github: GitHubPort, repo: string): Promise<RepoRef | n
   return found === "outside" ? null : found;
 }
 
+/**
+ * The commit a published app was published from: the recorded one (gitoqlok's last commit or the link's), or the
+ * head of its branch (the default branch when unknown) when the app already holds it. Publishing through the QMC
+ * after a merge leaves the recorded commit behind.
+ */
+async function publishedFrom(ports: FlowPorts, repo: string, branch: string, recorded: string | null): Promise<string | null> {
+  if (!recorded) return recorded;
+  const head = await ports.github.getBranchSha(repo, branch);
+  if (head === null || head === recorded || !(await isAncestor(ports.github, repo, recorded, head))) return recorded;
+  return startingCommit(ports, repo, recorded, head);
+}
+
 async function resolveLinked(ports: FlowPorts, link: LinkData, stored: "app" | "local"): Promise<AppStatus> {
   const { github } = ports;
   const repo = await linkedRepo(github, link.repo);
@@ -64,7 +76,10 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
   const link = await app.readLink();
 
   if (link) {
-    if (info.published) return { state: "published", repo: link.repo, branch: link.branch, syncedSha: link.syncedSha };
+    if (info.published) {
+      const syncedSha = await publishedFrom(ports, link.repo, link.branch, link.syncedSha);
+      return { state: "published", repo: link.repo, branch: link.branch, syncedSha };
+    }
     if (sameId(link.appId, info.id)) return resolveLinked(ports, link, "app");
     const repo = await linkedRepo(github, link.repo);
     if (!repo) return { state: "repo-missing", repo: link.repo };
@@ -103,7 +118,9 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
   const lastCommitId = meta?.lastCommitId ?? null;
 
   if (hit) {
-    if (info.published) return { state: "published", repo: hit.repo, branch: hit.branch, syncedSha: lastCommitId };
+    if (info.published) {
+      return { state: "published", repo: hit.repo, branch: hit.branch, syncedSha: await publishedFrom(ports, hit.repo, hit.branch, lastCommitId) };
+    }
     const head = await github.getBranchSha(hit.repo, hit.branch);
     if (head === null) {
       // Listed in the table, but the branch is gone: report it, nothing to store yet.
@@ -124,7 +141,10 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
   }
 
   if (metaRepo && meta) {
-    if (info.published) return { state: "published", repo: metaRepo.repo, branch: null, syncedSha: lastCommitId };
+    if (info.published) {
+      const syncedSha = await publishedFrom(ports, metaRepo.repo, metaRepo.defaultBranch, lastCommitId);
+      return { state: "published", repo: metaRepo.repo, branch: null, syncedSha };
+    }
     return {
       state: "duplicated",
       source: { repo: metaRepo.repo, branch: null, syncedSha: lastCommitId },

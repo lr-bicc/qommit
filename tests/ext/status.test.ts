@@ -189,8 +189,9 @@ describe("resolveStatus", () => {
 
   describe("app found in the table, gitoqlok's last commit lags behind a merge", () => {
     const SHEET = "objects/sheets/sh-1.json";
-    async function lagging(appHasMerge: boolean) {
-      const { ports, github, app } = setup({ meta: { repo: REPO, lastCommitId: null } });
+    async function lagging(appHasMerge: boolean, opts: { published?: boolean; inTable?: boolean; viaLink?: boolean } = {}) {
+      const { ports, github, app } = setup({ meta: { repo: REPO, lastCommitId: null }, info: { published: opts.published ?? false } },
+        { readmeApp: opts.inTable === false ? CANON_ID : APP_ID });
       const old = makeSnapshot();
       const merged = makeSnapshot();
       merged.sheets[0]!.qProperty.qMetaDef = { title: "Overview (Nordics)" };
@@ -199,7 +200,8 @@ describe("resolveStatus", () => {
         changes: [...oldFiles].map(([path, content]) => ({ path, content })) });
       const c2 = await github.commitFiles(REPO, { branch: "main", parentSha: c1, message: "Merge pull request #31",
         changes: [{ path: SHEET, content: serializeApp(merged, { canonicalAppId: CANON_ID }).get(SHEET)! }] });
-      app.meta = { repo: REPO, lastCommitId: c1 };
+      if (opts.viaLink) app.link = { repo: REPO, branch: "main", appId: APP_ID, syncedSha: c1 };
+      else app.meta = { repo: REPO, lastCommitId: c1 };
       if (appHasMerge) app.snapshot = merged;
       return { status: await resolveStatus(ports), c1, c2 };
     }
@@ -212,6 +214,26 @@ describe("resolveStatus", () => {
     it("the app is really older -> linked at gitoqlok's commit, one behind", async () => {
       const { status, c1 } = await lagging(false);
       expect(status).toMatchObject({ state: "linked", behindBy: 1, link: { branch: "main", syncedSha: c1 } });
+    });
+
+    it("published, the app holds the merge -> published from the head", async () => {
+      const { status, c2 } = await lagging(true, { published: true });
+      expect(status).toEqual({ state: "published", repo: REPO, branch: "main", syncedSha: c2 });
+    });
+
+    it("published, the app is really older -> published from gitoqlok's commit", async () => {
+      const { status, c1 } = await lagging(false, { published: true });
+      expect(status).toEqual({ state: "published", repo: REPO, branch: "main", syncedSha: c1 });
+    });
+
+    it("published, not in the branch table, the app holds the default branch -> published from its head", async () => {
+      const { status, c2 } = await lagging(true, { published: true, inTable: false });
+      expect(status).toEqual({ state: "published", repo: REPO, branch: null, syncedSha: c2 });
+    });
+
+    it("published with a link object whose commit lags -> published from the head", async () => {
+      const { status, c2 } = await lagging(true, { published: true, viaLink: true });
+      expect(status).toEqual({ state: "published", repo: REPO, branch: "main", syncedSha: c2 });
     });
   });
 });
