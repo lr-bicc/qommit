@@ -127,6 +127,11 @@ export function installFakeChrome(): FakeChrome {
       async query() {
         return clone(fake.tabs);
       },
+      async get(tabId: number) {
+        const tab = fake.tabs.find((t) => t.id === tabId);
+        if (!tab) throw new Error(`No tab with id: ${tabId}.`);
+        return clone(tab);
+      },
       onUpdated,
     },
     scripting: {

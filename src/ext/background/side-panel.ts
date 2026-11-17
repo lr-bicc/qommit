@@ -1,24 +1,17 @@
-import { loadOptions } from "../shared/options";
-
-export function panelOptionsFor(tabId: number, url: string | undefined, servers: string[]): { tabId: number; path: string; enabled: true } {
-  let origin: string | null = null;
-  if (url) {
-    try {
-      origin = new URL(url).origin;
-    } catch {
-      origin = null;
-    }
-  }
-  const own = origin !== null && servers.includes(origin);
-  return { tabId, path: own ? `panel.html?tabId=${tabId}` : "panel.html", enabled: true };
+/**
+ * Every tab gets its own panel that knows its tab. Whether the tab shows a configured Qlik server is decided by the
+ * panel itself (panel/tab-server.ts): Chrome does not reload an open panel when its path changes, so a panel opened
+ * while the tab was on another page (such as the sign-in redirect) must notice when the tab reaches the server.
+ */
+export function panelOptionsFor(tabId: number): { tabId: number; path: string; enabled: true } {
+  return { tabId, path: `panel.html?tabId=${tabId}`, enabled: true };
 }
 
 /** Sets the panel options of every open tab; a tab without an id is skipped. */
 async function applyToAllTabs(): Promise<void> {
-  const { servers } = await loadOptions();
   for (const tab of await chrome.tabs.query({})) {
     if (tab.id === undefined) continue;
-    await chrome.sidePanel.setOptions(panelOptionsFor(tab.id, tab.url, servers));
+    await chrome.sidePanel.setOptions(panelOptionsFor(tab.id));
   }
 }
 
@@ -34,15 +27,7 @@ export function wireSidePanel(): void {
     void openOnActionClick().catch(() => {});
   });
 
-  chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
-    void (async () => {
-      const { servers } = await loadOptions();
-      await chrome.sidePanel.setOptions(panelOptionsFor(tabId, tab.url, servers));
-    })();
-  });
-
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !("options" in changes)) return;
-    void applyToAllTabs();
+  chrome.tabs.onUpdated.addListener((tabId) => {
+    void chrome.sidePanel.setOptions(panelOptionsFor(tabId)).catch(() => {});
   });
 }

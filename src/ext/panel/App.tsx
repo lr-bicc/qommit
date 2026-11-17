@@ -11,6 +11,7 @@ import { Header, UnlinkDialog } from "./Header";
 import { HistoryTab } from "./HistoryTab";
 import { LocalChangesTab } from "./LocalChangesTab";
 import { SetupViews } from "./SetupViews";
+import { watchTabServer } from "./tab-server";
 
 type DialogKind = "connect" | "branch" | "unlink";
 
@@ -32,6 +33,16 @@ function repoOf(status: AppStatus): { repo: string; branch: string | null } | nu
     case "published": return { repo: status.repo, branch: status.branch };
     default: return null;
   }
+}
+
+/** The panel of one tab: Qommit while the tab shows a configured Qlik server, the hint otherwise. */
+export function PanelRoot(props: { tabId: number | null; createBridge: (tabId: number) => Bridge }): JSX.Element {
+  const { tabId, createBridge } = props;
+  const [onServer, setOnServer] = useState<boolean | null>(tabId === null ? false : null);
+  useEffect(() => (tabId === null ? undefined : watchTabServer(tabId, setOnServer)), [tabId]);
+  const bridge = useMemo(() => (onServer && tabId !== null ? createBridge(tabId) : null), [onServer, tabId, createBridge]);
+  if (onServer === null) return <main class="panel" />; // still checking: no flash of the hint
+  return <App bridge={bridge} />;
 }
 
 export function App(props: { bridge: Bridge | null }): JSX.Element {
