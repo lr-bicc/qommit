@@ -7,6 +7,7 @@ import { errorText } from "./errors";
 export interface SetupViewsProps {
   status: AppStatus & { state: "unlinked" | "duplicated" | "branch-missing" | "repo-missing" | "published" };
   appId: string; // the app the panel shows
+  published: boolean; // the app is published: read only, nothing to unlink or connect
   busy: boolean;
   /** Runs a command and reloads the status; `onError` returns true when it handled the failure itself. */
   mutate(command: Command, onError?: (error: CommandError) => boolean): Promise<void>;
@@ -84,6 +85,14 @@ export function SetupViews(props: SetupViewsProps): JSX.Element | null {
         </section>
       );
     case "repo-missing":
+      if (props.published) {
+        return (
+          <section class="view">
+            <p>Published app – read only. Duplicate the app to make changes.</p>
+            <p>{errorText({ code: "repo-not-found", message: "" }).text}</p>
+          </section>
+        );
+      }
       return (
         <section class="view">
           <p>{errorText({ code: "repo-not-found", message: "" }).text}</p>

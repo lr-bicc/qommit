@@ -159,6 +159,17 @@ test("repo-missing: Unlink Repository asks first, then unlinks and reloads", asy
   expect(bridge.commands.find((c) => c.cmd === "unlink")).toEqual({ cmd: "unlink", appId: APP_ID });
 });
 
+test("repo-missing in a published app: read only, no unlink or connect", async () => {
+  const missing = view({ state: "repo-missing", repo: "lr-bicc/sales-asia" });
+  if (missing.page !== "app") throw new Error("app view expected");
+  render(<App bridge={fakeBridge({ status: [{ ...missing, app: { ...missing.app, published: true } }] })} />);
+  await screen.findByText("Repository not found or no access.");
+  expect(screen.getByText("Published app – read only. Duplicate the app to make changes.")).toBeTruthy();
+  expect(screen.queryByText("Unlink Repository")).toBeNull();
+  expect(screen.queryByText("Connect to existing repository")).toBeNull();
+  expect(screen.queryByLabelText("Unlink repository")).toBeNull();
+});
+
 test("the header Unlink sends only after the confirmation and Cancel does nothing", async () => {
   const bridge = fakeBridge({ status: [view(LINKED), view({ state: "unlinked" })], unlink: [null] });
   render(<App bridge={bridge} />);

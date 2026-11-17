@@ -183,6 +183,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
           <SetupViews
             status={status}
             appId={appId}
+            published={app?.app.published ?? false}
             busy={busy}
             mutate={mutate}
             onConnect={() => setDialog("connect")}
@@ -205,7 +206,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
           repo={known?.repo}
           branch={known?.branch}
           behindBy={status?.state === "linked" ? status.behindBy : 0}
-          canUnlink={status?.state === "linked" || status?.state === "branch-missing" || status?.state === "repo-missing"}
+          canUnlink={!app?.app.published && (status?.state === "linked" || status?.state === "branch-missing" || status?.state === "repo-missing")}
           busy={busy}
           onUnlink={() => setDialog("unlink")}
           onRefresh={() => void load()}
