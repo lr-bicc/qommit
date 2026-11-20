@@ -55,3 +55,13 @@ test("a creation that never answers times out and still closes the global sessio
     vi.useRealTimers();
   }
 });
+
+test("appUrl builds the app link from origin and prefix", () => {
+  expect(setup().port.appUrl("abc")).toBe("https://qlik.example.com/qs/sense/app/abc");
+});
+
+test("a failure to open the created app carries its id", async () => {
+  const { port, deps } = setup();
+  deps.openSession.mockRejectedValueOnce(new Error("socket closed"));
+  await expect(port.createApp("x")).rejects.toMatchObject({ message: "socket closed", appId: "new-app" });
+});

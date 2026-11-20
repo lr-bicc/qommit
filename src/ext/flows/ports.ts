@@ -21,7 +21,9 @@ export interface AppPort {
 
 /** Server-wide actions: creating a new app and opening it. */
 export interface ServerPort {
+  /** Rejects with an error carrying `appId` when the app was created but could not be opened. */
   createApp(name: string): Promise<{ app: AppPort; close(): Promise<void> }>;
+  appUrl(appId: string): string;
 }
 
 export interface LinkCache {

@@ -312,25 +312,38 @@ export function fakeApp(init: {
 
 /** A server whose new apps start empty (script "", no objects). */
 export function fakeServer(): ServerPort & {
-  created: { name: string; app: ReturnType<typeof fakeApp> }[]; failAfterCreate(message: string): void;
+  created: { name: string; app: ReturnType<typeof fakeApp> }[];
+  /** The next createApp creates the app, then rejects with an error that carries its `appId`. */
+  failAfterCreate(message: string): void;
+  /** The next created app fails its apply at the given action index. */
+  failNextApplyAt(index: number, message: string): void;
 } {
   const created: { name: string; app: ReturnType<typeof fakeApp> }[] = [];
   let failure: string | null = null;
+  let applyFailure: { index: number; message: string } | null = null;
+  const urlOf = (id: string): string => `https://qlik.example.com/qs/sense/app/${id}`;
   return {
     created,
+    appUrl: urlOf,
+    failNextApplyAt(index, message) { applyFailure = { index, message }; },
     failAfterCreate(message) { failure = message; },
     async createApp(name) {
-      const id = `new-app-${created.length + 1}`;
+      // GUID-shaped like real app ids, so that /appcontent/<GUID>/ urls are rewritten
+      const id = `00000000-0000-4000-8000-${String(created.length + 1).padStart(12, "0")}`;
       const snapshot: AppSnapshot = {
         appId: id, script: "", appProps: [], variables: [], dimensions: [], measures: [], masterObjects: [],
         sheets: [], stories: [], bookmarks: [], staticFiles: new Map(),
       };
-      const app = fakeApp({ info: { id, title: name, url: `https://qlik.example.com/qs/sense/app/${id}` }, snapshot });
+      const app = fakeApp({ info: { id, title: name, url: urlOf(id) }, snapshot });
+      if (applyFailure !== null) {
+        app.failApplyAt(applyFailure.index, applyFailure.message);
+        applyFailure = null;
+      }
       created.push({ name, app });
       if (failure !== null) {
         const message = failure;
         failure = null;
-        throw new Error(message);
+        throw Object.assign(new Error(message), { appId: id });
       }
       return { app, close: async () => {} };
     },
