@@ -4,10 +4,14 @@ import { QlikReadError } from "../../qlik/reader";
 import { QlikSessionError, type EngineSession } from "../../qlik/session";
 import { QlikTimeoutError } from "../../qlik/timeout";
 import { commitChanges } from "../flows/commit";
+import { openDiff, type DiffSource } from "../flows/diff";
+import { importApp } from "../flows/import";
 import { computeLocalChanges } from "../flows/local-changes";
-import { FlowError, type AppPort, type FlowPorts, type LinkCache } from "../flows/ports";
+import { FlowError, type AppPort, type FlowPorts, type LinkCache, type ServerPort, type UpdateJournal } from "../flows/ports";
 import { connectRepository, createBranchForCopy, createRepository, suggestBranchName, unlinkApp } from "../flows/setup";
 import { resolveStatus, type AppStatus, type CopySource } from "../flows/status";
+import { addTag } from "../flows/tags";
+import { previewUpdate, runUpdate } from "../flows/update";
 import type { Command, CommandError, CommandResult, ProgressEvent, StatusView } from "../shared/commands";
 import { GatewayError, type GitHubPort } from "../shared/github-port";
 import type { Options } from "../shared/options";
@@ -22,6 +26,10 @@ export interface RouterDeps {
   fetch: typeof fetch;
   now(): Date;
   emit(event: ProgressEvent): void;
+  journal: UpdateJournal;
+  server(loc: QlikLocation): ServerPort;
+  /** Shows the differences in the page; the panel stays as it is. */
+  showDiff(source: DiffSource, opts: { select?: string; title: string }): void;
 }
 
 const PROGRESS_INTERVAL_MS = 250;
@@ -73,6 +81,13 @@ class AppChangedError extends Error {}
 
 const notLinked = (what: string): FlowError => new FlowError("not-linked", `${what} needs an app that is linked to a repository`);
 
+/** Ports for commands that compare commits only: the app side is never touched. */
+function noAppPorts(deps: RouterDeps, options: Options): FlowPorts {
+  const refuse = (): never => { throw new NoAppError("Open a Qlik Sense app to use this command"); };
+  const app: AppPort = { info: refuse, read: refuse, readLink: refuse, writeLink: refuse, removeLink: refuse, apply: refuse, save: refuse, readGitoqlokMeta: refuse };
+  return { app, github: deps.github, cache: deps.cache, repoPrefix: options.repoPrefix, now: deps.now };
+}
+
 /** Runs panel commands one after another against the app of the current tab. Never throws; errors become results. */
 export function createRouter(deps: RouterDeps): (command: Command) => Promise<CommandResult> {
   let session: EngineSession | null = null;
@@ -106,26 +121,49 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
   async function execute(command: Command): Promise<unknown> {
     if (command.cmd === "ping") return "pong";
     const loc = parseQlikUrl(deps.currentUrl());
-    if (!loc || loc.appId === null) {
-      if (command.cmd === "status") return { page: "hub" } satisfies StatusView;
-      throw new NoAppError("Open a Qlik Sense app to use this command");
-    }
-    const appLoc = { ...loc, appId: loc.appId };
-    const appId = appLoc.appId;
-    if ("appId" in command && command.appId.toLowerCase() !== appId.toLowerCase()) {
+    const appLoc = loc && loc.appId !== null ? { ...loc, appId: loc.appId } : null;
+    const needApp = (): QlikLocation & { appId: string } => {
+      if (!appLoc) throw new NoAppError("Open a Qlik Sense app to use this command");
+      return appLoc;
+    };
+    if (command.cmd === "status" && !appLoc) return { page: "hub" } satisfies StatusView;
+    if ("appId" in command && command.appId.toLowerCase() !== needApp().appId.toLowerCase()) {
       throw new AppChangedError("The tab now shows another app");
     }
 
-    if (command.cmd === "listRepos") return deps.github.listOrgRepos();
-    if (command.cmd === "listBranches") {
-      const repo = await deps.github.getRepo(command.repo);
-      if (!repo) throw new FlowError("repo-not-found", `Repository ${command.repo} was not found`);
-      const branches = await deps.github.listBranches(command.repo);
-      return { defaultBranch: repo.defaultBranch, branches: branches.map((b) => b.name) };
+    // These commands only talk to GitHub (or the Qlik server) and work on the hub, too.
+    switch (command.cmd) {
+      case "listRepos": return deps.github.listOrgRepos();
+      case "listBranches": {
+        const repo = await deps.github.getRepo(command.repo);
+        if (!repo) throw new FlowError("repo-not-found", `Repository ${command.repo} was not found`);
+        const branches = await deps.github.listBranches(command.repo);
+        return { defaultBranch: repo.defaultBranch, branches: branches.map((b) => b.name) };
+      }
+      case "commits": return deps.github.listCommits(command.repo, command.branch, command.page);
+      case "tags": return deps.github.listTags(command.repo);
+      case "addTag": {
+        await addTag(deps.github, command);
+        return null;
+      }
+      case "importApp": {
+        if (!loc) throw new NoAppError("Open Qlik Sense to use this command");
+        const server = deps.server({ origin: loc.origin, prefix: loc.prefix, appId: null });
+        return importApp({ github: deps.github, server }, command, (text) => emit({ event: "progress", text }));
+      }
+      case "showDiff":
+        if (command.before.kind === "commit" && command.after.kind === "commit") {
+          const source = await openDiff(noAppPorts(deps, await deps.loadOptions()), command.repo, command.before, command.after);
+          deps.showDiff(source, { select: command.select, title: command.title });
+          return null;
+        }
+        break;
     }
 
+    const appLocation = needApp();
+    const appId = appLocation.appId;
     const options = await deps.loadOptions();
-    const live = createAppPort(await sessionFor(appLoc), appLoc, deps.fetch);
+    const live = createAppPort(await sessionFor(appLocation), appLocation, deps.fetch);
     let lastProgress = Number.NEGATIVE_INFINITY;
     const onProgress = (done: number, total: number): void => {
       const at = deps.now().getTime();
@@ -148,6 +186,13 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
       return status;
     };
 
+    // Fresh status: the link may have changed elsewhere (same app open in another tab).
+    const freshLinked = async (): Promise<AppStatus & { state: "linked" }> => {
+      const status = await freshStatus();
+      if (status.state !== "linked") throw notLinked(command.cmd);
+      return status;
+    };
+
     // Mutating commands are multi-step: whatever fails, the app or GitHub may have changed already.
     let forget = false;
     try {
@@ -155,7 +200,8 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
       case "status": {
         const status = await freshStatus();
         const info = await app.info();
-        return { page: "app", app: info, status, suggestedBranch: suggestBranchName(info.user) } satisfies StatusView;
+        const interruptedUpdate = await deps.journal.get(info.id);
+        return { page: "app", app: info, status, suggestedBranch: suggestBranchName(info.user), interruptedUpdate } satisfies StatusView;
       }
       case "localChanges": {
         const status = await currentStatus();
@@ -186,10 +232,7 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
         return null;
       }
       case "commit": {
-        // Fresh status: the link may have changed elsewhere (same app open in another tab).
-        const status = await freshStatus();
-        if (status.state !== "linked") throw notLinked(command.cmd);
-        const { link } = status;
+        const { link } = await freshLinked();
         forget = true;
         const result = await commitChanges(ports, {
           link, message: command.message, paths: command.paths,
@@ -204,6 +247,20 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
         if (!repo) throw new FlowError("repo-not-found", `Repository ${link.repo} was not found`);
         const commits = await deps.github.listCommits(link.repo, link.branch, command.page);
         return { commits, defaultBranch: repo.defaultBranch };
+      }
+      case "updatePreview": {
+        const { link } = await freshLinked();
+        return previewUpdate(ports, { link, target: command.target, parts: command.parts });
+      }
+      case "update": {
+        const { link } = await freshLinked();
+        forget = true;
+        return runUpdate(ports, deps.journal, { link, target: command.target, parts: command.parts }, (text) => emit({ event: "progress", text }));
+      }
+      case "showDiff": {
+        const source = await openDiff(ports, command.repo, command.before, command.after);
+        deps.showDiff(source, { select: command.select, title: command.title });
+        return null;
       }
       default:
         throw new Error(`Unknown command: ${String((command as { cmd?: unknown }).cmd)}`);

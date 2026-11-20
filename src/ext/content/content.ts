@@ -1,12 +1,14 @@
 // Qommit content script: runs the commands of the side panel against the Qlik app of this tab.
 import enigma from "enigma.js";
-import { openSession, type EnigmaCreate } from "../../qlik/session";
+import { openGlobal, openSession, type EnigmaCreate } from "../../qlik/session";
 import type { LinkData } from "../../qlik/link";
 import type { LinkCache } from "../flows/ports";
 import type { Command, ProgressEvent } from "../shared/commands";
 import { createGitHubPort, type GatewayRequest, type GatewayResponse } from "../shared/github-port";
 import { loadOptions } from "../shared/options";
+import { createJournal } from "./journal";
 import { createRouter } from "./router";
+import { createServerPort } from "./server-port";
 
 const guard = globalThis as { __qommitContent?: boolean };
 
@@ -40,18 +42,29 @@ const cache: LinkCache = {
   },
 };
 
+/** Replaced by the diff overlay in a later task. */
+function showDiff(): void {}
+
 function start(): void {
+  const qlik = { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init), create: enigma.create as unknown as EnigmaCreate };
   const github = createGitHubPort((request: GatewayRequest) =>
     chrome.runtime.sendMessage({ target: "gateway", request }) as Promise<GatewayResponse>);
 
   const router = createRouter({
     currentUrl: () => location.href,
-    openSession: (loc) => openSession(loc, { fetch: (input, init) => fetch(input, init), create: enigma.create as unknown as EnigmaCreate }),
+    openSession: (loc) => openSession(loc, qlik),
     github,
     cache,
     loadOptions,
     fetch: (input, init) => fetch(input, init),
     now: () => new Date(),
+    journal: createJournal(chrome.storage.session),
+    server: (loc) => createServerPort(loc, {
+      openGlobal: (l) => openGlobal(l, qlik),
+      openSession: (l) => openSession(l, qlik),
+      fetch: (input, init) => fetch(input, init),
+    }),
+    showDiff,
     emit: (event: ProgressEvent) => {
       // rejects when no panel is open
       chrome.runtime.sendMessage({ target: "panel", event }).catch(() => {});

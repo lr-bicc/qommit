@@ -61,5 +61,6 @@ export function view(status: AppStatus): StatusView {
     app: { id: APP_ID, title: "Sales", published: status.state === "published", url: `https://qlik.example.com/sense/app/${APP_ID}`, user: "r.vasilev", canWrite: true },
     status,
     suggestedBranch: "r.vasilev",
+    interruptedUpdate: null,
   };
 }

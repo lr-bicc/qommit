@@ -5,7 +5,7 @@ import type { Command, CommandResult, ProgressEvent } from "../../src/ext/shared
 import { createGitHubPort, type GatewayRequest, type GatewayResponse } from "../../src/ext/shared/github-port";
 import type { EngineSession } from "../../src/qlik/session";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
-import { fakeCache } from "../ext/fake-ports";
+import { fakeCache, fakeServer, memoryJournal } from "../ext/fake-ports";
 import { appFromSnapshot, fakeDoc } from "../qlik/fake-engine";
 
 const TOKEN = "ghp_integrationSecret42";
@@ -246,6 +246,9 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
     }) as typeof fetch,
     now: () => new Date((clock += 1000)),
     emit: (e) => { events.push(e); },
+    journal: memoryJournal(),
+    server: () => fakeServer(),
+    showDiff: () => {},
   });
   const run = async (command: Command): Promise<CommandResult> => {
     const result = await router(command);

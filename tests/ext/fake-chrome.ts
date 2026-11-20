@@ -14,6 +14,8 @@ function eventTarget() {
 
 export interface FakeChrome {
   store: Record<string, unknown>; // chrome.storage.local contents
+  session: Record<string, unknown>; // chrome.storage.session contents
+  sessionAccessLevels: unknown[]; // chrome.storage.session.setAccessLevel arguments
   grantPermissions: boolean; // answer of chrome.permissions.request
   permissionRequests: string[][]; // origins of each request
   removedPermissions: string[][]; // origins of each chrome.permissions.remove call
@@ -38,6 +40,8 @@ export function installFakeChrome(): FakeChrome {
 
   const fake: FakeChrome = {
     store: {},
+    session: {},
+    sessionAccessLevels: [],
     grantPermissions: true,
     permissionRequests: [],
     removedPermissions: [],
@@ -67,34 +71,44 @@ export function installFakeChrome(): FakeChrome {
   // `respond` throwing rejects the call; returning undefined means nobody answered.
   const answer = async (message: unknown) => clone(fake.respond(message));
 
-  const storageLocal = {
+  const storageArea = (name: string, contents: () => Record<string, unknown>) => ({
     async get(keys?: string | string[] | null) {
-      const wanted = keys == null ? Object.keys(fake.store) : Array.isArray(keys) ? keys : [keys];
+      const data = contents();
+      const wanted = keys == null ? Object.keys(data) : Array.isArray(keys) ? keys : [keys];
       const out: Record<string, unknown> = {};
-      for (const key of wanted) if (key in fake.store) out[key] = clone(fake.store[key]);
+      for (const key of wanted) if (key in data) out[key] = clone(data[key]);
       return out;
     },
     async set(items: Record<string, unknown>) {
+      const data = contents();
       const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
       for (const [key, value] of Object.entries(items)) {
-        changes[key] = { oldValue: clone(fake.store[key]), newValue: clone(value) };
-        fake.store[key] = clone(value);
+        changes[key] = { oldValue: clone(data[key]), newValue: clone(value) };
+        data[key] = clone(value);
       }
-      for (const fn of [...onChanged.listeners]) fn(changes, "local");
+      for (const fn of [...onChanged.listeners]) fn(changes, name);
     },
     async remove(keys: string | string[]) {
+      const data = contents();
       const changes: Record<string, { oldValue?: unknown }> = {};
       for (const key of Array.isArray(keys) ? keys : [keys]) {
-        if (!(key in fake.store)) continue;
-        changes[key] = { oldValue: clone(fake.store[key]) };
-        delete fake.store[key];
+        if (!(key in data)) continue;
+        changes[key] = { oldValue: clone(data[key]) };
+        delete data[key];
       }
-      for (const fn of [...onChanged.listeners]) fn(changes, "local");
+      for (const fn of [...onChanged.listeners]) fn(changes, name);
+    },
+  });
+  const storageLocal = storageArea("local", () => fake.store);
+  const storageSession = {
+    ...storageArea("session", () => fake.session),
+    async setAccessLevel(options: unknown) {
+      fake.sessionAccessLevels.push(clone(options));
     },
   };
 
   (globalThis as any).chrome = {
-    storage: { local: storageLocal, onChanged },
+    storage: { local: storageLocal, session: storageSession, onChanged },
     permissions: {
       async request(req: { origins?: string[] }) {
         fake.permissionRequests.push([...(req.origins ?? [])]);
