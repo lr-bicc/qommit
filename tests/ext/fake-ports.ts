@@ -3,7 +3,7 @@ import { findBranchForApp, parseBranchTable } from "../../src/core/repo-layout";
 import type { AppSnapshot, FileContent, FileMap } from "../../src/core/types";
 import type { AppInfo, AppPort, FlowPorts, LinkCache } from "../../src/ext/flows/ports";
 import { GatewayError, type GitHubPort } from "../../src/ext/shared/github-port";
-import type { CommitInfo } from "../../src/github/repo";
+import type { BlobRef, CommitInfo, TagInfo } from "../../src/github/repo";
 import type { LinkData } from "../../src/qlik/link";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
 
@@ -18,6 +18,7 @@ interface FakeRepo {
   branches: Map<string, string>;
   protectedBranches: Set<string>;
   race: boolean;
+  tags: Map<string, TagInfo>;
 }
 
 function cloneContent(c: FileContent): FileContent {
@@ -38,11 +39,15 @@ export function fakeGitHub(): GitHubPort & {
   deleteBranch(repo: string, branch: string): void;
   isMarked(repo: string): boolean;
   failMarking(): void;
+  tag(repo: string, name: string, sha: string, message?: string): void;
+  /** Number of blobs read through readBlobs. */
+  blobReads(): number;
 } {
   const repos = new Map<string, FakeRepo>();
   const marked = new Set<string>();
   let markingFails = false;
   let counter = 0;
+  let blobsRead = 0;
 
   const newSha = (): string => "c0de".repeat(8) + (++counter).toString(16).padStart(8, "0");
   const notFound = (what: string) => new GatewayError("not-found", `${what} not found`);
@@ -78,9 +83,9 @@ export function fakeGitHub(): GitHubPort & {
     }
     return seen;
   };
-  const info = (r: FakeRepo, c: FakeCommit): CommitInfo => ({ sha: c.sha, message: c.message, author: "octocat", date: FIXED_DATE, parents: [] });
+  const info = (r: FakeRepo, c: FakeCommit): CommitInfo => ({ sha: c.sha, message: c.message, author: "octocat", date: FIXED_DATE, parents: [...c.parents] });
   const createRepoState = (name: string, files: FileMap, defaultBranch: string, message: string): string => {
-    const r: FakeRepo = { defaultBranch, commits: new Map(), branches: new Map(), protectedBranches: new Set(), race: false };
+    const r: FakeRepo = { defaultBranch, commits: new Map(), branches: new Map(), protectedBranches: new Set(), race: false, tags: new Map() };
     const c = addCommit(r, [], message, cloneFiles(files));
     r.branches.set(defaultBranch, c.sha);
     repos.set(name, r);
@@ -106,6 +111,12 @@ export function fakeGitHub(): GitHubPort & {
     deleteBranch: (repo, branch) => void repoOf(repo).branches.delete(branch),
     isMarked: (repo) => marked.has(repo),
     failMarking: () => { markingFails = true; },
+    tag(repo, name, sha, message = "") {
+      const r = repoOf(repo);
+      commitOf(r, sha);
+      r.tags.set(name, { name, sha, date: FIXED_DATE, message });
+    },
+    blobReads: () => blobsRead,
 
     async whoAmI() { return { login: "octocat" }; },
     async listOrgRepos() {
@@ -144,6 +155,26 @@ export function fakeGitHub(): GitHubPort & {
       const tree = new Map<string, string>();
       for (const [path, content] of commitOf(repoOf(repo), commitSha).files) tree.set(path, await gitBlobSha(content));
       return tree;
+    },
+    async listTags(repo) { return [...repoOf(repo).tags.values()].map((t) => ({ ...t })); },
+    async createTag(repo, input) {
+      const r = repoOf(repo);
+      commitOf(r, input.sha);
+      if (r.tags.has(input.name)) throw new GatewayError("name-exists", `tag ${input.name} already exists`);
+      r.tags.set(input.name, { name: input.name, sha: input.sha, date: FIXED_DATE, message: input.message });
+    },
+    async readBlobs(repo, items: BlobRef[]) {
+      const r = repoOf(repo);
+      const bySha = new Map<string, FileContent>();
+      for (const c of r.commits.values()) for (const content of c.files.values()) bySha.set(await gitBlobSha(content), content);
+      const out: FileMap = new Map();
+      for (const { path, sha } of items) {
+        const content = bySha.get(sha);
+        if (content === undefined) throw notFound(`blob ${sha}`);
+        blobsRead++;
+        out.set(path, cloneContent(content));
+      }
+      return out;
     },
     async readTextFile(repo, ref, path) {
       const r = repoOf(repo);

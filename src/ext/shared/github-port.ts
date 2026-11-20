@@ -1,7 +1,8 @@
-import type { CommitInfo, FileChange } from "../../github/repo";
+import type { FileMap } from "../../core/types";
+import type { BlobRef, CommitInfo, FileChange, TagInfo } from "../../github/repo";
 import type { GitHubErrorKind } from "../../github/errors";
 import type { OrgRepo, RepoRef } from "../../github/snapshot";
-import { toWire, type WireContent } from "./wire";
+import { fromWire, toWire, type WireContent } from "./wire";
 
 export interface GitHubPort {
   whoAmI(): Promise<{ login: string }>;
@@ -20,6 +21,10 @@ export interface GitHubPort {
   commitFiles(repo: string, input: { branch: string; parentSha: string; message: string; changes: FileChange[]; replaceRoot?: boolean }): Promise<string>;
   listCommits(repo: string, branch: string, page: number): Promise<CommitInfo[]>;
   compare(repo: string, base: string, head: string): Promise<{ status: "identical" | "ahead" | "behind" | "diverged"; aheadBy: number; behindBy: number; commits: CommitInfo[] }>;
+  listTags(repo: string): Promise<TagInfo[]>;
+  createTag(repo: string, input: { name: string; sha: string; message: string }): Promise<void>;
+  /** At most 100 blobs per call; `appcontent/` paths come back as bytes, all others as text. */
+  readBlobs(repo: string, items: BlobRef[]): Promise<FileMap>;
 }
 
 export type GatewayErrorKind = GitHubErrorKind | "no-token" | "not-allowed" | "internal";
@@ -77,5 +82,9 @@ export function createGitHubPort(send: (request: GatewayRequest) => Promise<Gate
     },
     listCommits: (repo, branch, page) => call("listCommits", repo, branch, page) as Promise<CommitInfo[]>,
     compare: (repo, base, head) => call("compare", repo, base, head) as ReturnType<GitHubPort["compare"]>,
+    listTags: (repo) => call("listTags", repo) as Promise<TagInfo[]>,
+    createTag: async (repo, input) => void (await call("createTag", repo, input)),
+    readBlobs: async (repo, items) =>
+      new Map(((await call("readBlobs", repo, items)) as [string, WireContent][]).map(([path, c]) => [path, fromWire(c)])),
   };
 }
