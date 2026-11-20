@@ -71,6 +71,32 @@ test("Open options with a bridge calls openOptions", async () => {
   expect(bridge.optionsOpened).toBe(1);
 });
 
+test("a failed refresh shows its message once, not the old view below it", async () => {
+  const noToken = new BridgeError({ code: "no-token", message: "x" });
+  const published = view({ state: "published", repo: "lr-bicc/sales", branch: "main", syncedSha: "a".repeat(40) });
+  const bridge = fakeBridge({
+    status: [published, noToken, published],
+    localChanges: [{ repo: "lr-bicc/sales", baseSha: "a".repeat(40), items: [], unmaintained: [] }, noToken, { repo: "lr-bicc/sales", baseSha: "a".repeat(40), items: [], unmaintained: [] }],
+  });
+  render(<App bridge={bridge} />);
+  await screen.findByText("Published app – read only. Duplicate the app to make changes.");
+  fireEvent.click(screen.getByLabelText("Refresh"));
+  await screen.findByText("No GitHub token configured.");
+  await waitFor(() => expect(screen.queryByText("Published app – read only. Duplicate the app to make changes.")).toBeNull());
+  expect(screen.getAllByText("No GitHub token configured.")).toHaveLength(1);
+  fireEvent.click(screen.getByLabelText("Refresh")); // the token is back
+  await screen.findByText("Published app – read only. Duplicate the app to make changes.");
+  expect(screen.queryByText("No GitHub token configured.")).toBeNull();
+});
+
+test("a failed action keeps the view it was started from", async () => {
+  const bridge = fakeBridge({ status: [view({ state: "unlinked" })], createRepository: [new BridgeError({ code: "no-token", message: "x" })] });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Create repository"));
+  await screen.findByText("No GitHub token configured.");
+  expect(screen.getByText("No linked repository")).toBeTruthy();
+});
+
 test("the hub page asks to open an app", async () => {
   render(<App bridge={fakeBridge({ status: [{ page: "hub" }] })} />);
   await screen.findByText("Open an app to use Qommit.");

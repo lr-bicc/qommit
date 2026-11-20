@@ -63,6 +63,7 @@ export function App(props: { bridge: Bridge | null }): JSX.Element {
 function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   const [view, setView] = useState<StatusView | null>(null);
   const [error, setError] = useState<CommandError | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false); // the last status load failed: hide the stale view
   const [running, setRunning] = useState(0);
   const [progress, setProgress] = useState("Ready");
   const [dialog, setDialog] = useState<DialogKind | null>(null);
@@ -115,8 +116,11 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
       else if (shown.current?.kind !== "other") shown.current = { kind: "hub", appId: null };
       setView(next);
       setError(null);
+      setLoadFailed(false);
     } catch (e) {
-      if (alive.current) setError(toCommandError(e));
+      if (!alive.current) return;
+      setError(toCommandError(e));
+      setLoadFailed(true); // the view below is stale: its own requests would only repeat the message
     }
   }, [run]);
 
@@ -217,7 +221,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
       {!app && view === null && error !== null && (
         <button type="button" class="icon" title="Refresh" aria-label="Refresh" disabled={busy} onClick={() => void load()}>↻</button>
       )}
-      <div class="content">{body}</div>
+      {!loadFailed && <div class="content">{body}</div>}
       {dialog === "connect" && app && <ConnectDialog {...dialogProps} suggestedBranch={app.suggestedBranch} />}
       {dialog === "branch" && app && status && (status.state === "duplicated" || status.state === "branch-missing") && (
         <CreateBranchDialog
