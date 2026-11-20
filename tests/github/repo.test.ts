@@ -343,12 +343,29 @@ test("readBlobs decodes text with its BOM and appcontent as bytes", async () => 
   expect(files.get("appcontent/a.png")).toEqual(new Uint8Array([0, 255]));
 });
 test("readBlobs refuses more than 100 items and stops starting requests after a failure", async () => {
-  const m = mockFetch({ [`GET ${SR}/git/blobs/s0`]: () => ({ status: 500, body: { message: "boom" } }) });
+  const slowOk = () => new Promise<{ body: unknown }>((r) => setTimeout(() => r({ body: { encoding: "base64", content: "YQ==" } }), 5));
+  const routes: Record<string, () => unknown> = { [`GET ${SR}/git/blobs/s0`]: () => ({ status: 500, body: { message: "boom" } }) };
+  for (let i = 1; i < 20; i++) routes[`GET ${SR}/git/blobs/s${i}`] = slowOk;
+  const m = mockFetch(routes as Parameters<typeof mockFetch>[0]);
   const c = createGitHubClient({ token: "t", fetch: m.fetch });
   expect(MAX_BLOBS_PER_CALL).toBe(100);
   await expect(readBlobs(c, S, Array.from({ length: 101 }, (_, i) => ({ path: `p${i}`, sha: "s" })))).rejects.toThrow("Too many blobs");
   expect(m.calls.length).toBe(0);
   const items = Array.from({ length: 20 }, (_, i) => ({ path: `p${i}`, sha: `s${i}` }));
   await expect(readBlobs(c, S, items)).rejects.toThrow();
+  await new Promise((r) => setTimeout(r, 50)); // let the other workers' in-flight requests finish and loop
   expect(m.calls.length).toBeLessThanOrEqual(8);
+});
+test("readBlobs runs at most 8 requests at a time and reads them all", async () => {
+  let inFlight = 0, peak = 0;
+  const routes: Record<string, () => unknown> = {};
+  for (let i = 0; i < 30; i++) routes[`GET ${SR}/git/blobs/s${i}`] = () => new Promise((resolve) => {
+    inFlight++; peak = Math.max(peak, inFlight);
+    setTimeout(() => { inFlight--; resolve({ body: { encoding: "base64", content: "YQ==" } }); }, 2);
+  });
+  const m = mockFetch(routes as Parameters<typeof mockFetch>[0]);
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  const files = await readBlobs(c, S, Array.from({ length: 30 }, (_, i) => ({ path: `p${i}`, sha: `s${i}` })));
+  expect(files.size).toBe(30);
+  expect(peak).toBe(8);
 });
