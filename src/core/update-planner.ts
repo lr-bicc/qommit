@@ -79,6 +79,33 @@ function temporaryRenames(cur: Map<string, Payload>, tgt: Map<string, Payload>):
   return actions.sort((a, b) => (a as { id: string }).id < (b as { id: string }).id ? -1 : 1);
 }
 
+/**
+ * Orders variable upserts so that no write produces a duplicate name: an upsert that takes a name
+ * runs after the upsert that moves its current holder away (ties by id). Holders that went to a
+ * temporary name have already released theirs.
+ */
+function orderByNameDependency<T extends { id: string; payload: Payload }>(upserts: T[], cur: Map<string, Payload>, released: Set<string>): T[] {
+  const holderOfName = new Map<string, string>(); // current name -> id
+  for (const [id, p] of cur) { const n = nameOf(p); if (n !== undefined) holderOfName.set(n, id); }
+  const byIdMap = new Map(upserts.map(u => [u.id, u]));
+  const out: T[] = [];
+  const state = new Map<string, "visiting" | "done">();
+  const visit = (u: T): void => {
+    if (state.has(u.id)) return;
+    state.set(u.id, "visiting");
+    const name = nameOf(u.payload);
+    const holder = name === undefined ? undefined : holderOfName.get(name);
+    if (holder !== undefined && holder !== u.id && !released.has(holder)) {
+      const dep = byIdMap.get(holder);
+      if (dep) visit(dep);
+    }
+    state.set(u.id, "done");
+    out.push(u);
+  };
+  upserts.forEach(visit);
+  return out;
+}
+
 export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: ReadonlySet<Part>): Action[] {
   const upserts: Action[] = [];
   const deletes: Action[] = [];
@@ -101,7 +128,9 @@ export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: Rea
       groupDeletes.sort(byId);
 
       if (group === "variables") {
-        upserts.push(...temporaryRenames(cur, tgt));
+        const temps = temporaryRenames(cur, tgt);
+        upserts.push(...temps);
+        const ordered = orderByNameDependency(groupUpserts, cur, new Set(temps.map(t => (t as { id: string }).id)));
         // A deleted variable must free its name immediately before another variable takes it.
         const freed = new Map<string, Action[]>();
         for (const d of groupDeletes) {
@@ -109,7 +138,7 @@ export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: Rea
           if (name !== undefined) freed.set(name, [...(freed.get(name) ?? []), d]);
         }
         const early = new Set<Action>();
-        for (const u of groupUpserts) {
+        for (const u of ordered) {
           const name = nameOf(u.payload);
           const blockers = name === undefined ? undefined : freed.get(name);
           if (blockers) { upserts.push(...blockers); blockers.forEach(b => early.add(b)); freed.delete(name!); }

@@ -82,7 +82,7 @@ test("two variables that swap their names go through a temporary name", () => {
   const tgt = snap({ variables: [v("a", "vY"), v("b", "vX")] });
   const actions = planUpdate(cur, tgt, new Set(["objects"]));
   const names = actions.filter(isUpsert).map((a) => `${a.id}:${(a.payload as GenericProps).qName}${a.temporary ? "*" : ""}`);
-  expect(names).toEqual(["a:vX__qommit_a*", "a:vY", "b:vX"]);
+  expect(names).toEqual(["a:vX__qommit_a*", "b:vX", "a:vY"]);
   expect(summarize(actions)).toEqual({ create: 0, change: 2, delete: 0 });
 });
 test("a plain rename needs no temporary name", () => {
@@ -97,4 +97,10 @@ test("describeAction names objects by their title", () => {
   expect(describeAction({ op: "delete", group: "measures", id: "m1" })).toEqual({ kind: "delete", group: "measures", id: "m1", title: "m1" });
   expect(describeAction({ op: "setScript", script: "" })).toEqual({ kind: "change", group: "script", id: "script", title: "Load script" });
   expect(describeAction({ op: "deleteFile", name: "logo.png" })).toEqual({ kind: "delete", group: "files", id: "logo.png", title: "logo.png" });
+});
+test("a chain of renames runs the last link first, without a temporary name", () => {
+  const cur = snap({ variables: [v("a", "vX"), v("b", "vY")] });
+  const tgt = snap({ variables: [v("a", "vY"), v("b", "vZ")] });
+  const ups = planUpdate(cur, tgt, new Set(["objects"])).filter(isUpsert);
+  expect(ups.map((a) => `${a.id}:${(a.payload as GenericProps).qName}${a.temporary ? "*" : ""}`)).toEqual(["b:vZ", "a:vY"]);
 });
