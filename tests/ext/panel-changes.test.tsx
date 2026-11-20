@@ -176,7 +176,7 @@ test("behind: the dialog lists the commits, Cancel keeps message and selection",
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).getByText("The branch has 1 new commit that this save would overwrite:")).toBeTruthy();
   expect(within(dialog).getByText("theirs")).toBeTruthy();
-  expect(within(dialog).getByText("Updating the app is not part of this version yet.")).toBeTruthy();
+  expect(within(dialog).getByText("Update first")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Cancel"));
   expect(screen.queryByRole("dialog")).toBeNull();
   expect((screen.getByPlaceholderText("Commit message") as HTMLTextAreaElement).value).toBe("Fix");
@@ -302,7 +302,7 @@ test("Refresh in the header loads the local changes again", async () => {
   await screen.findByText("Overview");
   fireEvent.click(screen.getByLabelText("Refresh"));
   await screen.findByText("No local changes");
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "localChanges", "status", "localChanges"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !["listBranches", "tags", "commits"].includes(c))).toEqual(["status", "localChanges", "status", "localChanges"]);
 });
 
 test("a changed reload token loads the changes again", async () => {

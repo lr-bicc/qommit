@@ -11,6 +11,9 @@ const OTHER_ID = "33333333-3333-4333-8333-333333333333";
 const APP_URL = `https://qlik.example.com/sense/app/${APP_ID}`;
 
 let chrome: FakeChrome;
+/** Commands of the Local Changes tab that these tests do not look at. */
+const PICKER_AND_CHANGES: string[] = ["localChanges", "listBranches", "tags", "commits"];
+
 beforeEach(() => {
   chrome = installFakeChrome();
 });
@@ -108,7 +111,7 @@ test("the header shows title, repo link, branch and the commits behind", async (
   await screen.findByText("Repository has 2 new commits");
   expect(screen.getByText("Sales")).toBeTruthy();
   expect(screen.getByText("lr-bicc/sales").getAttribute("href")).toBe("https://github.com/lr-bicc/sales");
-  expect(screen.getByText("main")).toBeTruthy();
+  expect(within(document.querySelector("header") as HTMLElement).getByText("main")).toBeTruthy(); // the branch picker lists it, too
 });
 
 test("one commit behind uses the singular", async () => {
@@ -176,12 +179,12 @@ test("repo-missing: Unlink Repository asks first, then unlinks and reloads", asy
   render(<App bridge={bridge} />);
   await screen.findByText("Repository not found or no access.");
   fireEvent.click(screen.getAllByText("Unlink Repository")[0]);
-  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !PICKER_AND_CHANGES.includes(c))).toEqual(["status"]);
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByText("Unlink this app from lr-bicc/sales?")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Unlink"));
   await screen.findByText("No linked repository");
-  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !PICKER_AND_CHANGES.includes(c))).toEqual(["status", "unlink", "status"]);
   expect(bridge.commands.find((c) => c.cmd === "unlink")).toEqual({ cmd: "unlink", appId: APP_ID });
 });
 
@@ -215,12 +218,12 @@ test("the header Unlink sends only after the confirmation and Cancel does nothin
   fireEvent.click(screen.getByTitle("Unlink repository"));
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel"));
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !PICKER_AND_CHANGES.includes(c))).toEqual(["status"]);
   fireEvent.click(screen.getByTitle("Unlink repository"));
   expect(screen.getByText("Unlink this app from lr-bicc/sales?")).toBeTruthy();
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
   await screen.findByText("No linked repository");
-  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !PICKER_AND_CHANGES.includes(c))).toEqual(["status", "unlink", "status"]);
 });
 
 test("a linked app shows the two tabs", async () => {
@@ -468,7 +471,7 @@ test("a failed unlink keeps the confirmation open with the error and can be repe
   await within(screen.getByRole("dialog")).findByText("Network error.");
   fireEvent.click(within(screen.getByRole("dialog")).getByText("Unlink"));
   await screen.findByText("No linked repository");
-  expect(bridge.commands.map((c) => c.cmd).filter((c) => c !== "localChanges")).toEqual(["status", "unlink", "unlink", "status"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !PICKER_AND_CHANGES.includes(c))).toEqual(["status", "unlink", "unlink", "status"]);
 });
 
 describe("the panel follows its tab", () => {

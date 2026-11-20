@@ -177,7 +177,8 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
             <button type="button" role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>History</button>
           </div>
           {tab === "changes"
-            ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} onSaved={() => void load(false)} reloadToken={reloadToken} />
+            ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} repo={status.link.repo} onSaved={() => void load(false)} reloadToken={reloadToken}
+              update={app.app.canWrite && !app.app.published ? { repo: status.link.repo, branch: status.link.branch, headSha: status.headSha, behindBy: status.behindBy, onUpdated: () => void load() } : undefined} />
             : <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken} />}
         </>
       );
@@ -195,7 +196,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
             onUnlink={() => setDialog("unlink")}
           />
           {status.state === "published" && status.syncedSha !== null && status.syncedSha !== "" && (
-            <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={true} onSaved={() => void load(false)} reloadToken={reloadToken} />
+            <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={true} repo={status.repo} onSaved={() => void load(false)} reloadToken={reloadToken} />
           )}
         </>
       );
@@ -215,6 +216,12 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
           onUnlink={() => setDialog("unlink")}
           onRefresh={() => void load()}
         />
+      )}
+      {app?.interruptedUpdate && (
+        <p class="notice">
+          {`The last update did not finish (${app.interruptedUpdate.total} changes planned). Update again`}
+          {app.interruptedUpdate.backupBranch !== null ? `, or restore your work from ${app.interruptedUpdate.backupBranch}.` : "."}
+        </p>
       )}
       {view === null && error === null && <p class="muted">Loading…</p>}
       {error && <ErrorMessage error={error} onOptions={() => bridge.openOptions()} onRetry={() => void load()} disabled={busy} />}

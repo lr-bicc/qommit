@@ -45,3 +45,19 @@ test("qlik-read carries the error's message as detail; other codes have none", (
     .toEqual({ text: "Could not read the app from Qlik.", action: "retry", detail: "Could not read sheet s1: timeout" });
   expect(errorText(e("network")).detail).toBeUndefined();
 });
+
+test.each([
+  ["cannot-write", "You have no permission to change this app."],
+  ["tag-exists", "Tag already exists."],
+  ["invalid-tag-name", "Invalid tag name."],
+  ["import-failed", "The import stopped. The new app was created but is incomplete."],
+  ["invalid-target", "The selected state contains files that cannot be applied."],
+])("%s (plan 3)", (code, text) => {
+  const result = errorText(e(code));
+  expect(result.text).toBe(text);
+  expect(result.action).toBeUndefined();
+});
+
+test("update-failed shows the message as detail", () => {
+  expect(errorText(e("update-failed", { message: "Qlik said no" }))).toEqual({ text: "The update stopped.", detail: "Qlik said no" });
+});
