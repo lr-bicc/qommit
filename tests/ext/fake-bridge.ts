@@ -58,7 +58,7 @@ export const LINKED: AppStatus = { state: "linked", link: LINK, defaultBranch: "
 export function view(status: AppStatus): StatusView {
   return {
     page: "app",
-    app: { id: APP_ID, title: "Sales", published: status.state === "published", url: `https://qlik.example.com/sense/app/${APP_ID}`, user: "r.vasilev" },
+    app: { id: APP_ID, title: "Sales", published: status.state === "published", url: `https://qlik.example.com/sense/app/${APP_ID}`, user: "r.vasilev", canWrite: true },
     status,
     suggestedBranch: "r.vasilev",
   };

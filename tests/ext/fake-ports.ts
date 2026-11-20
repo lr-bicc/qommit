@@ -1,10 +1,12 @@
 import { gitBlobSha } from "../../src/core/git-hash";
 import { findBranchForApp, parseBranchTable } from "../../src/core/repo-layout";
-import type { AppSnapshot, FileContent, FileMap } from "../../src/core/types";
-import type { AppInfo, AppPort, FlowPorts, LinkCache } from "../../src/ext/flows/ports";
+import type { Action, AppObjectGroup } from "../../src/core/update-planner";
+import type { AppSnapshot, FileContent, FileMap, GenericProps, PropertyTree } from "../../src/core/types";
+import type { AppInfo, AppPort, FlowPorts, LinkCache, ServerPort } from "../../src/ext/flows/ports";
 import { GatewayError, type GitHubPort } from "../../src/ext/shared/github-port";
 import type { BlobRef, CommitInfo, TagInfo } from "../../src/github/repo";
 import type { LinkData } from "../../src/qlik/link";
+import { ApplyError } from "../../src/qlik/writer";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
 
 const ORG = "lr-bicc";
@@ -231,20 +233,56 @@ export function fakeGitHub(): GitHubPort & {
   };
 }
 
+type Payload = GenericProps | PropertyTree;
+const payloadId = (p: Payload): string => ("qChildren" in p && "qProperty" in p ? (p as PropertyTree).qProperty.qInfo.qId : p.qInfo.qId);
+const GROUP_FIELD: Record<AppObjectGroup, "appProps" | "variables" | "dimensions" | "measures" | "masterObjects" | "sheets" | "stories"> = {
+  appprops: "appProps", variables: "variables", dimensions: "dimensions", measures: "measures",
+  masterobjects: "masterObjects", sheets: "sheets", stories: "stories",
+};
+
 export function fakeApp(init: {
   info?: Partial<AppInfo>; snapshot?: AppSnapshot; link?: LinkData | null;
   meta?: { repo: string | null; lastCommitId: string | null } | null; writable?: boolean;
-}): AppPort & { snapshot: AppSnapshot; link: LinkData | null; meta: { repo: string | null; lastCommitId: string | null } | null } {
+}): AppPort & {
+  snapshot: AppSnapshot; link: LinkData | null; meta: { repo: string | null; lastCommitId: string | null } | null;
+  saves: number; reads: number; failApplyAt(index: number, message: string): void;
+} {
   const appInfo: AppInfo = {
-    id: APP_ID, title: "Sales", published: false, url: `https://qlik.example.com/qs/sense/app/${APP_ID}`, user: "r.vasilev",
+    id: APP_ID, title: "Sales", published: false, url: `https://qlik.example.com/qs/sense/app/${APP_ID}`, user: "r.vasilev", canWrite: true,
     ...init.info,
+  };
+  let failAt: { index: number; message: string } | null = null;
+  const applyOne = (snap: AppSnapshot, a: Action): void => {
+    switch (a.op) {
+      case "upsert": {
+        const list = snap[GROUP_FIELD[a.group]] as Payload[];
+        const at = list.findIndex((p) => payloadId(p) === a.id);
+        const payload = structuredClone(a.payload);
+        if (at >= 0) list[at] = payload;
+        else list.push(payload);
+        return;
+      }
+      case "delete": {
+        const list = snap[GROUP_FIELD[a.group]] as Payload[];
+        const at = list.findIndex((p) => payloadId(p) === a.id);
+        if (at >= 0) list.splice(at, 1);
+        return;
+      }
+      case "setScript": snap.script = a.script; return;
+      case "putFile": snap.staticFiles.set(a.name, a.bytes.slice()); return;
+      case "deleteFile": snap.staticFiles.delete(a.name);
+    }
   };
   const app = {
     snapshot: init.snapshot ?? makeSnapshot(),
     link: init.link ?? (null as LinkData | null),
     meta: init.meta ?? (null as { repo: string | null; lastCommitId: string | null } | null),
+    saves: 0,
+    reads: 0,
+    failApplyAt(index: number, message: string) { failAt = { index, message }; },
     async info() { return { ...appInfo }; },
     async read(opts: { includeFiles: boolean; onProgress?: (done: number, total: number) => void }) {
+      app.reads++;
       const copy = structuredClone(app.snapshot);
       if (!opts.includeFiles) copy.staticFiles = new Map();
       opts.onProgress?.(1, 1);
@@ -257,8 +295,46 @@ export function fakeApp(init: {
     },
     async removeLink() { app.link = null; },
     async readGitoqlokMeta() { return app.meta ? { ...app.meta } : null; },
+    async apply(actions: Action[], onProgress?: (done: number, total: number) => void) {
+      onProgress?.(0, actions.length);
+      for (let i = 0; i < actions.length; i++) {
+        if (failAt !== null && i === failAt.index) {
+          throw new ApplyError(failAt.message, actions.slice(0, i), actions[i]!, actions.slice(i + 1));
+        }
+        applyOne(app.snapshot, actions[i]!);
+        onProgress?.(i + 1, actions.length);
+      }
+    },
+    async save() { app.saves++; },
   };
   return app;
+}
+
+/** A server whose new apps start empty (script "", no objects). */
+export function fakeServer(): ServerPort & {
+  created: { name: string; app: ReturnType<typeof fakeApp> }[]; failAfterCreate(message: string): void;
+} {
+  const created: { name: string; app: ReturnType<typeof fakeApp> }[] = [];
+  let failure: string | null = null;
+  return {
+    created,
+    failAfterCreate(message) { failure = message; },
+    async createApp(name) {
+      const id = `new-app-${created.length + 1}`;
+      const snapshot: AppSnapshot = {
+        appId: id, script: "", appProps: [], variables: [], dimensions: [], measures: [], masterObjects: [],
+        sheets: [], stories: [], bookmarks: [], staticFiles: new Map(),
+      };
+      const app = fakeApp({ info: { id, title: name, url: `https://qlik.example.com/qs/sense/app/${id}` }, snapshot });
+      created.push({ name, app });
+      if (failure !== null) {
+        const message = failure;
+        failure = null;
+        throw new Error(message);
+      }
+      return { app, close: async () => {} };
+    },
+  };
 }
 
 export function fakeCache(): LinkCache & { entries: Map<string, LinkData>; unlinked: Set<string> } {

@@ -66,9 +66,9 @@ test("reads repository and last commit from gitoqlok's metadata", async () => {
   expect(await readGitoqlokMeta(fakeDoc(appFromSnapshot(makeSnapshot())).doc)).toBeNull();
 });
 test("reads title and published state", async () => {
-  expect(await readAppInfo(fakeDoc(appFromSnapshot(makeSnapshot(), { title: "T", published: true })).doc)).toEqual({ title: "T", published: true });
+  expect(await readAppInfo(fakeDoc(appFromSnapshot(makeSnapshot(), { title: "T", published: true })).doc)).toEqual({ title: "T", published: true, canWrite: true });
   const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
-  expect(await readAppInfo(fake.doc)).toEqual({ title: "Test app", published: false });
+  expect(await readAppInfo(fake.doc)).toEqual({ title: "Test app", published: false, canWrite: true });
 });
 
 describe("missing object detection", () => {
@@ -123,4 +123,15 @@ describe("timeouts", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(await outcome).toBeInstanceOf(QlikTimeoutError);
   });
+});
+
+test("canWrite follows the app's update permission", async () => {
+  const withLayout = (permissions?: { update?: boolean }) => {
+    const fake = fakeDoc(appFromSnapshot(makeSnapshot()));
+    fake.doc.getAppLayout = async () => ({ qTitle: "T", published: false, ...(permissions ? { permissions } : {}) });
+    return fake.doc;
+  };
+  expect((await readAppInfo(withLayout({ update: false }))).canWrite).toBe(false);
+  expect((await readAppInfo(withLayout({ update: true }))).canWrite).toBe(true);
+  expect((await readAppInfo(withLayout())).canWrite).toBe(true);
 });

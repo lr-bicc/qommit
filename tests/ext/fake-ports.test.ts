@@ -1,5 +1,7 @@
 import { GatewayError } from "../../src/ext/shared/github-port";
-import { fakeGitHub } from "./fake-ports";
+import { ApplyError } from "../../src/qlik/writer";
+import { makeSnapshot } from "../fixtures/snapshot";
+import { fakeApp, fakeGitHub, fakeServer } from "./fake-ports";
 
 test("fake readBlobs answers with the files of the commit", async () => {
   const gh = fakeGitHub();
@@ -33,4 +35,45 @@ test("fake listCommits returns the parents", async () => {
   const commits = await gh.listCommits("lr-bicc/sales", "main", 1);
   expect(commits.find((c) => c.sha === next)!.parents).toEqual([root]);
   expect(commits.find((c) => c.sha === root)!.parents).toEqual([]);
+});
+
+test("fake app apply changes the snapshot that read returns", async () => {
+  const app = fakeApp({});
+  const v = makeSnapshot().variables[0]!;
+  const id = v.qInfo.qId;
+  await app.apply([
+    { op: "upsert", group: "variables", id, exists: true, payload: { ...v, qComment: "changed" } },
+    { op: "setScript", script: "LOAD 1;" },
+    { op: "putFile", name: "n.png", exists: false, bytes: new Uint8Array([7]) },
+    { op: "deleteFile", name: "logo.png" },
+  ]);
+  const snap = await app.read({ includeFiles: true });
+  expect(snap.script).toBe("LOAD 1;");
+  expect(snap.variables.find((x) => x.qInfo.qId === id)!.qComment).toBe("changed");
+  expect([...snap.staticFiles.keys()]).toEqual(["n.png"]);
+  await app.apply([{ op: "delete", group: "variables", id }]);
+  expect((await app.read({ includeFiles: false })).variables.some((x) => x.qInfo.qId === id)).toBe(false);
+  await app.save();
+  expect([app.saves, app.reads]).toEqual([1, 2]);
+});
+
+test("fake app failApplyAt applies the actions before the index and throws ApplyError", async () => {
+  const app = fakeApp({});
+  app.failApplyAt(1, "boom");
+  const actions = [{ op: "setScript" as const, script: "A" }, { op: "setScript" as const, script: "B" }, { op: "setScript" as const, script: "C" }];
+  const err = await app.apply(actions).catch((e) => e);
+  expect(err).toBeInstanceOf(ApplyError);
+  expect(err.message).toBe("boom");
+  expect([err.done, err.failed, err.remaining]).toEqual([[actions[0]], actions[1], [actions[2]]]);
+  expect(app.snapshot.script).toBe("A");
+});
+
+test("fake server creates empty apps; failAfterCreate records the app and rejects", async () => {
+  const server = fakeServer();
+  const { app } = await server.createApp("Sales (main)");
+  expect((await app.read({ includeFiles: true })).script).toBe("");
+  expect(server.created.map((c) => c.name)).toEqual(["Sales (main)"]);
+  server.failAfterCreate("open failed");
+  await expect(server.createApp("Second")).rejects.toThrow("open failed");
+  expect(server.created.map((c) => c.name)).toEqual(["Sales (main)", "Second"]);
 });

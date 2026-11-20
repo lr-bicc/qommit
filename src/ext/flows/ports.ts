@@ -1,10 +1,11 @@
 import { groupOf } from "../../core/diff";
 import type { AppSnapshot } from "../../core/types";
+import type { Action } from "../../core/update-planner";
 import type { LinkData } from "../../qlik/link";
 import type { GitHubPort } from "../shared/github-port";
 import { GatewayError } from "../shared/github-port";
 
-export interface AppInfo { id: string; title: string; published: boolean; url: string; user: string }
+export interface AppInfo { id: string; title: string; published: boolean; url: string; user: string; canWrite: boolean }
 
 export interface AppPort {
   info(): Promise<AppInfo>;
@@ -12,7 +13,15 @@ export interface AppPort {
   readLink(): Promise<LinkData | null>;
   writeLink(link: LinkData): Promise<void>;
   removeLink(): Promise<void>;
+  /** Applies the actions in order; a failure rejects with ApplyError. Does not save the app. */
+  apply(actions: Action[], onProgress?: (done: number, total: number) => void): Promise<void>;
+  save(): Promise<void>;
   readGitoqlokMeta(): Promise<{ repo: string | null; lastCommitId: string | null } | null>;
+}
+
+/** Server-wide actions: creating a new app and opening it. */
+export interface ServerPort {
+  createApp(name: string): Promise<{ app: AppPort; close(): Promise<void> }>;
 }
 
 export interface LinkCache {
