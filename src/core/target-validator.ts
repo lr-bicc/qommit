@@ -1,9 +1,9 @@
-import type { FileContent, FileMap } from "./types";
+import type { AppSnapshot, FileContent, FileMap } from "./types";
 import { TAB_ORDER_PATH, TAB_DIVIDER } from "./script-tabs";
 import { groupOf } from "./diff";
 
 export type TargetProblemReason =
-  | "invalid-json" | "conflict-markers" | "missing-tab-file" | "unlisted-tab-file" | "missing-tab-order" | "invalid-object";
+  | "invalid-json" | "conflict-markers" | "missing-tab-file" | "unlisted-tab-file" | "missing-tab-order" | "invalid-object" | "variable-name-taken";
 export interface TargetProblem { path: string; reason: TargetProblemReason }
 
 const TAB_DIR = "data_load_script/";
@@ -80,5 +80,20 @@ export function validateTarget(files: FileMap): TargetProblem[] {
   }
 
   return [...problems].map(([path, reason]) => ({ path, reason }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/**
+ * Target variables that would take the name of a script-created or reserved variable of the app.
+ * Those variables are never written, so Qlik would refuse the name; sorted by path.
+ */
+export function variableNameConflicts(app: AppSnapshot, target: AppSnapshot): TargetProblem[] {
+  const owned = new Map<string, string>(); // name -> id of the app's own variable
+  for (const v of app.variables) {
+    if ((v.qIsScriptCreated === true || v.qIsReserved === true) && typeof v.qName === "string") owned.set(v.qName, v.qInfo.qId);
+  }
+  return target.variables
+    .filter((v) => typeof v.qName === "string" && owned.has(v.qName) && owned.get(v.qName) !== v.qInfo.qId)
+    .map((v): TargetProblem => ({ path: `objects/variables/${v.qInfo.qId}.json`, reason: "variable-name-taken" }))
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }

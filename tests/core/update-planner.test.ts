@@ -1,4 +1,6 @@
-import { planUpdate, summarize } from "../../src/core/update-planner";
+import { planUpdate, summarize, describeAction } from "../../src/core/update-planner";
+import type { Action } from "../../src/core/update-planner";
+import type { AppSnapshot, GenericProps, PropertyTree } from "../../src/core/types";
 import { makeSnapshot } from "../fixtures/snapshot";
 const ALL = new Set(["script", "objects", "bookmarks", "files"] as const);
 
@@ -67,4 +69,32 @@ test("nothing outside the selected parts is planned", () => {
   const tgt = makeSnapshot(); tgt.sheets = []; tgt.script = "x"; tgt.staticFiles.clear();
   expect(planUpdate(makeSnapshot(), tgt, new Set(["bookmarks"] as const))).toEqual([]);
   expect(planUpdate(makeSnapshot(), tgt, new Set(["files"] as const)).map(a => a.op)).toEqual(["deleteFile"]);
+});
+
+const snap = (over: Partial<AppSnapshot>): AppSnapshot => ({ ...makeSnapshot(), variables: [], dimensions: [], measures: [], masterObjects: [], sheets: [],
+  appProps: [], script: "", staticFiles: new Map(), ...over });
+const v = (id: string, qName: string): GenericProps => ({ qInfo: { qId: id, qType: "variable" }, qName, qDefinition: "1" });
+const tree = (id: string, props: Record<string, unknown>): PropertyTree => ({ qProperty: { qInfo: { qId: id, qType: "sheet" }, ...props }, qChildren: [] });
+const isUpsert = (a: Action): a is Extract<Action, { op: "upsert" }> => a.op === "upsert";
+
+test("two variables that swap their names go through a temporary name", () => {
+  const cur = snap({ variables: [v("a", "vX"), v("b", "vY")] });
+  const tgt = snap({ variables: [v("a", "vY"), v("b", "vX")] });
+  const actions = planUpdate(cur, tgt, new Set(["objects"]));
+  const names = actions.filter(isUpsert).map((a) => `${a.id}:${(a.payload as GenericProps).qName}${a.temporary ? "*" : ""}`);
+  expect(names).toEqual(["a:vX__qommit_a*", "a:vY", "b:vX"]);
+  expect(summarize(actions)).toEqual({ create: 0, change: 2, delete: 0 });
+});
+test("a plain rename needs no temporary name", () => {
+  const actions = planUpdate(snap({ variables: [v("a", "vX")] }), snap({ variables: [v("a", "vZ")] }), new Set(["objects"]));
+  expect(actions.filter(isUpsert).some((a) => a.temporary)).toBe(false);
+});
+test("describeAction names objects by their title", () => {
+  expect(describeAction({ op: "upsert", group: "sheets", id: "s1", exists: false, payload: tree("s1", { qMetaDef: { title: "Overview" } }) }))
+    .toEqual({ kind: "create", group: "sheets", id: "s1", title: "Overview" });
+  expect(describeAction({ op: "upsert", group: "variables", id: "a", exists: true, payload: v("a", "vX") }))
+    .toEqual({ kind: "change", group: "variables", id: "a", title: "vX" });
+  expect(describeAction({ op: "delete", group: "measures", id: "m1" })).toEqual({ kind: "delete", group: "measures", id: "m1", title: "m1" });
+  expect(describeAction({ op: "setScript", script: "" })).toEqual({ kind: "change", group: "script", id: "script", title: "Load script" });
+  expect(describeAction({ op: "deleteFile", name: "logo.png" })).toEqual({ kind: "delete", group: "files", id: "logo.png", title: "logo.png" });
 });
