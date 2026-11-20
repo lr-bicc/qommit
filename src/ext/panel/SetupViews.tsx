@@ -32,6 +32,14 @@ export function SetupViews(props: SetupViewsProps): JSX.Element | null {
 
   switch (status.state) {
     case "unlinked": {
+      if (props.published) {
+        return (
+          <section class="view">
+            <p>Published app – read only. Duplicate the app to make changes.</p>
+            <p>No linked repository</p>
+          </section>
+        );
+      }
       const create = (name?: string): void => {
         setTaken(null);
         const command: Command = name === undefined

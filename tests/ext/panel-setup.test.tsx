@@ -196,6 +196,18 @@ test("repo-missing in a published app: read only, no unlink or connect", async (
   expect(screen.queryByLabelText("Unlink repository")).toBeNull();
 });
 
+test("an unlinked published app: read only, no create or connect", async () => {
+  const unlinked = view({ state: "unlinked" });
+  if (unlinked.page !== "app") throw new Error("app view expected");
+  const bridge = fakeBridge({ status: [{ ...unlinked, app: { ...unlinked.app, published: true } }] });
+  render(<App bridge={bridge} />);
+  await screen.findByText("No linked repository");
+  expect(screen.getByText("Published app – read only. Duplicate the app to make changes.")).toBeTruthy();
+  expect(screen.queryByText("Create repository")).toBeNull();
+  expect(screen.queryByText("Connect to existing repository")).toBeNull();
+  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status"]);
+});
+
 test("the header Unlink sends only after the confirmation and Cancel does nothing", async () => {
   const bridge = fakeBridge({ status: [view(LINKED), view({ state: "unlinked" })], unlink: [null] });
   render(<App bridge={bridge} />);
