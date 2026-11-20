@@ -182,6 +182,24 @@ describe("openGlobal and createApp", () => {
     expect(await createApp(g.global, "Sales (main)")).toBe("new");
     expect(createAppCall).toHaveBeenCalledWith("Sales (main)");
   });
+  test("createApp that never answers is a QlikSessionError after 30 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const global = { createApp: () => new Promise(() => {}) } as unknown as EngineApi;
+      const outcome = createApp(global, "x").catch((e) => e);
+      await vi.advanceTimersByTimeAsync(29_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await outcome;
+      expect(err).toBeInstanceOf(QlikSessionError);
+      expect(err.message).toBe("Qlik did not answer in time.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   test("createApp without qSuccess is a QlikSessionError", async () => {
     const global = { createApp: async () => ({ qSuccess: false }) } as unknown as EngineApi;
     await expect(createApp(global, "x")).rejects.toThrow("Could not create the app");

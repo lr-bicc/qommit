@@ -39,3 +39,19 @@ test("a failed creation closes the global session and opens no app session", asy
   expect(order).toEqual(["createApp", "global.close"]);
   expect(deps.openSession).not.toHaveBeenCalled();
 });
+
+test("a creation that never answers times out and still closes the global session", async () => {
+  vi.useFakeTimers();
+  try {
+    const { port, order, deps } = setup();
+    const never = { createApp: () => new Promise(() => {}) } as unknown as EngineApi;
+    deps.openGlobal.mockResolvedValueOnce({ global: never, close: async () => { order.push("global.close"); } });
+    const outcome = port.createApp("x").catch((e) => e);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await outcome).toBeInstanceOf(QlikSessionError);
+    expect(order).toEqual(["global.close"]);
+    expect(deps.openSession).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});

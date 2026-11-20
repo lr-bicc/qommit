@@ -1,7 +1,7 @@
 import schema from "enigma.js/schemas/12.2027.0.json";
 import type { EngineApi } from "./engine-types";
 import { engineUrl, type QlikLocation } from "./location";
-import { QlikTimeoutError, withTimeout } from "./timeout";
+import { engineCall, QlikTimeoutError, withTimeout } from "./timeout";
 
 /** Opening the socket and the document together. */
 const OPEN_TIMEOUT_MS = 20_000;
@@ -133,7 +133,13 @@ export async function openGlobal(
 
 /** Creates an empty app on the server and returns its id. */
 export async function createApp(global: EngineApi, name: string): Promise<string> {
-  const res = (await global.createApp(name)) as { qSuccess?: boolean; qAppId?: string } | undefined;
+  let res: { qSuccess?: boolean; qAppId?: string } | undefined;
+  try {
+    res = await engineCall(global.createApp(name));
+  } catch (e) {
+    if (e instanceof QlikTimeoutError) throw new QlikSessionError(e.message);
+    throw e;
+  }
   if (res?.qSuccess !== true || typeof res.qAppId !== "string" || res.qAppId === "") throw new QlikSessionError("Could not create the app");
   return res.qAppId;
 }
