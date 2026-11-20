@@ -78,7 +78,7 @@ export function fakeGitHub(): GitHubPort & {
     }
     return seen;
   };
-  const info = (r: FakeRepo, c: FakeCommit): CommitInfo => ({ sha: c.sha, message: c.message, author: "octocat", date: FIXED_DATE });
+  const info = (r: FakeRepo, c: FakeCommit): CommitInfo => ({ sha: c.sha, message: c.message, author: "octocat", date: FIXED_DATE, parents: [] });
   const createRepoState = (name: string, files: FileMap, defaultBranch: string, message: string): string => {
     const r: FakeRepo = { defaultBranch, commits: new Map(), branches: new Map(), protectedBranches: new Set(), race: false };
     const c = addCommit(r, [], message, cloneFiles(files));

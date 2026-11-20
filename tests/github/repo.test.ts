@@ -1,4 +1,4 @@
-import { commitFiles, getTree, getBranchSha, createBranch, compare, createTag, isValidRefName, listBranches, listTags, listCommits, getRepo, markRepo, readTextFile, whoAmI } from "../../src/github/repo";
+import { commitFiles, getTree, getBranchSha, createBranch, compare, createTag, isValidRefName, listBranches, listTags, listCommits, getRepo, markRepo, readTextFile, whoAmI, readBlobs, MAX_BLOBS_PER_CALL } from "../../src/github/repo";
 import { createGitHubClient } from "../../src/github/client";
 import { mockFetch } from "./mock-fetch";
 const R = "/repos/lr-bicc/demo";
@@ -98,12 +98,11 @@ test("slash branch names, list mappings, non-not-found errors propagate, many bl
   const m = mockFetch({
     [`GET ${R}/git/ref/heads/feature/x`]: () => ({ body: { object: { sha: "c9" } } }),
     [`GET ${R}/git/ref/heads/boom`]: () => ({ status: 403, body: { message: "Forbidden" } }),
-    [`GET ${R}/branches?per_page=100`]: () => ({ body: [{ name: "main", commit: { sha: "c1" } }] }),
-    [`GET ${R}/tags?per_page=100`]: () => ({ body: [{ name: "v1", commit: { sha: "c1" } }] }),
+    [`GET ${R}/branches?per_page=100&page=1`]: () => ({ body: [{ name: "main", commit: { sha: "c1" } }] }),
     [`GET ${R}/commits?sha=feature/x&per_page=30&page=2`]: () => ({ body: [
-      { sha: "c1", commit: { message: "m1", author: { name: "A", date: "2026-01-01T00:00:00Z" } } }] }),
+      { sha: "c1", parents: [{ sha: "c0" }], commit: { message: "m1", author: { name: "A", date: "2026-01-01T00:00:00Z" } } }] }),
     [`GET ${R}/compare/a...b`]: () => ({ body: { status: "ahead", ahead_by: 1, behind_by: 0, commits: [
-      { sha: "c2", commit: { message: "m2", author: { name: "B", date: "d" } } }] } }),
+      { sha: "c2", parents: [], commit: { message: "m2", author: { name: "B", date: "d" } } }] } }),
     [`GET ${R}/git/commits/p1`]: () => ({ body: { tree: { sha: "t0" } } }),
     [`POST ${R}/git/blobs`]: () => ({ status: 201, body: { sha: "b" } }),
     [`POST ${R}/git/trees`]: () => ({ status: 201, body: { sha: "t1" } }),
@@ -114,9 +113,8 @@ test("slash branch names, list mappings, non-not-found errors propagate, many bl
   expect(await getBranchSha(c, "lr-bicc/demo", "feature/x")).toBe("c9");
   await expect(getBranchSha(c, "lr-bicc/demo", "boom")).rejects.toMatchObject({ kind: "forbidden" });
   expect(await listBranches(c, "lr-bicc/demo")).toEqual([{ name: "main", sha: "c1" }]);
-  expect(await listTags(c, "lr-bicc/demo")).toEqual([{ name: "v1", sha: "c1" }]);
-  expect(await listCommits(c, "lr-bicc/demo", "feature/x", 2)).toEqual([{ sha: "c1", message: "m1", author: "A", date: "2026-01-01T00:00:00Z" }]);
-  expect((await compare(c, "lr-bicc/demo", "a", "b")).commits).toEqual([{ sha: "c2", message: "m2", author: "B", date: "d" }]);
+  expect(await listCommits(c, "lr-bicc/demo", "feature/x", 2)).toEqual([{ sha: "c1", message: "m1", author: "A", date: "2026-01-01T00:00:00Z", parents: ["c0"] }]);
+  expect((await compare(c, "lr-bicc/demo", "a", "b")).commits).toEqual([{ sha: "c2", message: "m2", author: "B", date: "d", parents: [] }]);
   const changes = Array.from({ length: 12 }, (_, i) => ({ path: `f${i}`, content: new Uint8Array([i]) }));
   await commitFiles(c, "lr-bicc/demo", { branch: "feature/x", parentSha: "p1", message: "m", changes });
   expect(m.calls.filter(x => x.url.endsWith("/git/blobs")).length).toBe(12);
@@ -284,4 +282,73 @@ test("markRepo writes nothing when the topic is already set", async () => {
   const m = mockFetch({ [`GET ${R}/topics`]: () => ({ body: { names: ["qommit"] } }) });
   await markRepo(createGitHubClient({ token: "t", fetch: m.fetch }), "lr-bicc/demo");
   expect(m.calls.map((x) => x.method)).toEqual(["GET"]);
+});
+
+const S = "lr-bicc/sales";
+const SR = "/repos/lr-bicc/sales";
+const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
+
+test("listCommits returns the parents of each commit", async () => {
+  const m = mockFetch({ [`GET ${SR}/commits?sha=main&per_page=30&page=1`]: () => ({ body: [
+    { sha: "b", parents: [{ sha: "a" }], commit: { message: "m", author: { name: "A", date: "d" } } }] }) });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect((await listCommits(c, S, "main", 1))[0].parents).toEqual(["a"]);
+});
+test("listBranches reads every page", async () => {
+  const branch = (i: number) => ({ name: `b${i}`, commit: { sha: `s${i}` } });
+  const m = mockFetch({
+    [`GET ${SR}/branches?per_page=100&page=1`]: () => ({ body: Array.from({ length: 100 }, (_, i) => branch(i)) }),
+    [`GET ${SR}/branches?per_page=100&page=2`]: () => ({ body: Array.from({ length: 3 }, (_, i) => branch(100 + i)) }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  const all = await listBranches(c, S);
+  expect(all.length).toBe(103);
+  expect(all[102]).toEqual({ name: "b102", sha: "s102" });
+  expect(m.calls.length).toBe(2);
+});
+test("listTags reads annotated and lightweight tags over all pages", async () => {
+  const m = mockFetch({ "POST /graphql": (req) => {
+    const v = (req.body as { variables: Record<string, unknown> }).variables;
+    return v.cursor == null
+      ? { body: { data: { repository: { refs: { pageInfo: { hasNextPage: true, endCursor: "cur1" }, nodes: [
+        { name: "v1", target: { __typename: "Tag", oid: "t1", message: "first", tagger: { date: "2026-01-01T00:00:00Z" }, target: { oid: "c1" } } }] } } } } }
+      : { body: { data: { repository: { refs: { pageInfo: { hasNextPage: false, endCursor: "cur2" }, nodes: [
+        { name: "v0", target: { __typename: "Commit", oid: "c0", committedDate: "2025-12-01T00:00:00Z" } }] } } } } };
+  } });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(await listTags(c, S)).toEqual([
+    { name: "v1", sha: "c1", date: "2026-01-01T00:00:00Z", message: "first" },
+    { name: "v0", sha: "c0", date: "2025-12-01T00:00:00Z", message: "" },
+  ]);
+  const vars = m.calls.map((x) => (x.body as { variables: Record<string, unknown> }).variables);
+  expect(vars[0]).toMatchObject({ owner: "lr-bicc", name: "sales" });
+  expect(vars[0].cursor ?? null).toBeNull();
+  expect(vars[1]).toMatchObject({ owner: "lr-bicc", name: "sales", cursor: "cur1" });
+});
+test("listTags stops on a null cursor instead of restarting", async () => {
+  const m = mockFetch({ "POST /graphql": () => ({ body: { data: { repository: { refs: {
+    pageInfo: { hasNextPage: true, endCursor: null }, nodes: [] } } } } }) });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(await listTags(c, S)).toEqual([]);
+  expect(m.calls.length).toBe(1);
+});
+test("readBlobs decodes text with its BOM and appcontent as bytes", async () => {
+  const m = mockFetch({
+    [`GET ${SR}/git/blobs/s1`]: () => ({ body: { encoding: "base64", content: b64([0xef, 0xbb, 0xbf, 0x61, 0x0a]) } }),
+    [`GET ${SR}/git/blobs/s2`]: () => ({ body: { encoding: "base64", content: b64([0, 255]) } }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  const files = await readBlobs(c, S, [{ path: "data_load_script/Main.qvs", sha: "s1" }, { path: "appcontent/a.png", sha: "s2" }]);
+  expect(files.get("data_load_script/Main.qvs")).toBe("\ufeffa\n");
+  expect(files.get("appcontent/a.png")).toEqual(new Uint8Array([0, 255]));
+});
+test("readBlobs refuses more than 100 items and stops starting requests after a failure", async () => {
+  const m = mockFetch({ [`GET ${SR}/git/blobs/s0`]: () => ({ status: 500, body: { message: "boom" } }) });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  expect(MAX_BLOBS_PER_CALL).toBe(100);
+  await expect(readBlobs(c, S, Array.from({ length: 101 }, (_, i) => ({ path: `p${i}`, sha: "s" })))).rejects.toThrow("Too many blobs");
+  expect(m.calls.length).toBe(0);
+  const items = Array.from({ length: 20 }, (_, i) => ({ path: `p${i}`, sha: `s${i}` }));
+  await expect(readBlobs(c, S, items)).rejects.toThrow();
+  expect(m.calls.length).toBeLessThanOrEqual(8);
 });

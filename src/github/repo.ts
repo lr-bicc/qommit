@@ -1,14 +1,17 @@
-import type { FileContent } from "../core/types";
+import type { FileContent, FileMap } from "../core/types";
 import { GitHubError } from "./errors";
 import type { GitHubClient } from "./client";
 import type { RepoRef } from "./snapshot";
 import { QOMMIT_TOPIC } from "../core/repo-layout";
 
-export interface CommitInfo { sha: string; message: string; author: string; date: string }
-export interface TagInfo { name: string; sha: string }
+export interface CommitInfo { sha: string; message: string; author: string; date: string; parents: string[] }
+export interface TagInfo { name: string; sha: string /* commit */; date: string | null; message: string }
+export interface BlobRef { path: string; sha: string }
 export interface FileChange { path: string; content: FileContent | null } // null = delete
 
 const MAX_CONCURRENT_BLOBS = 5;
+export const MAX_BLOBS_PER_CALL = 100;
+const MAX_CONCURRENT_BLOB_READS = 8;
 /** Largest text (in UTF-8 bytes) sent inline, and the most inline content one tree request carries. */
 const MAX_INLINE_BYTES = 1_000_000;
 
@@ -27,10 +30,10 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-interface RawCommit { sha: string; commit: { message: string; author: { name: string; date: string } } }
+interface RawCommit { sha: string; parents: { sha: string }[]; commit: { message: string; author: { name: string; date: string } } }
 
 function toCommitInfo(c: RawCommit): CommitInfo {
-  return { sha: c.sha, message: c.commit.message, author: c.commit.author.name, date: c.commit.author.date };
+  return { sha: c.sha, message: c.commit.message, author: c.commit.author.name, date: c.commit.author.date, parents: c.parents.map((p) => p.sha) };
 }
 
 export async function getBranchSha(c: GitHubClient, repo: string, branch: string): Promise<string | null> {
@@ -44,8 +47,12 @@ export async function getBranchSha(c: GitHubClient, repo: string, branch: string
 }
 
 export async function listBranches(c: GitHubClient, repo: string): Promise<{ name: string; sha: string }[]> {
-  const res = await c.rest<{ name: string; commit: { sha: string } }[]>("GET", `/repos/${repo}/branches?per_page=100`);
-  return res.map((b) => ({ name: b.name, sha: b.commit.sha }));
+  const out: { name: string; sha: string }[] = [];
+  for (let page = 1; ; page++) {
+    const res = await c.rest<{ name: string; commit: { sha: string } }[]>("GET", `/repos/${repo}/branches?per_page=100&page=${page}`);
+    for (const b of res) out.push({ name: b.name, sha: b.commit.sha });
+    if (res.length < 100) return out;
+  }
 }
 
 /** Maps path to blob SHA; only blobs are included. */
@@ -157,9 +164,66 @@ export async function createTag(c: GitHubClient, repo: string, input: { name: st
   await c.rest("POST", `/repos/${repo}/git/refs`, { ref: `refs/tags/${input.name}`, sha: tag.sha });
 }
 
+const TAGS_QUERY = `query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    refs(refPrefix: "refs/tags/", first: 100, after: $cursor, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name target { __typename oid ... on Tag { message tagger { date } target { oid } } ... on Commit { committedDate } } }
+    }
+  }
+}`;
+
+interface TagsResponse {
+  repository: { refs: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: ({ name: string; target: {
+      __typename: string; oid: string; message?: string; tagger?: { date: string | null } | null;
+      target?: { oid: string }; committedDate?: string | null;
+    } } | null)[];
+  } };
+}
+
+/** Lists all tags, newest first. Annotated tags resolve to the commit they point at. */
 export async function listTags(c: GitHubClient, repo: string): Promise<TagInfo[]> {
-  const res = await c.rest<{ name: string; commit: { sha: string } }[]>("GET", `/repos/${repo}/tags?per_page=100`);
-  return res.map((t) => ({ name: t.name, sha: t.commit.sha }));
+  const [owner, name] = repo.split("/");
+  const out: TagInfo[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const data: TagsResponse = await c.graphql<TagsResponse>(TAGS_QUERY, { owner, name, cursor });
+    const { nodes, pageInfo } = data.repository.refs;
+    for (const n of nodes) {
+      if (!n) continue;
+      const t = n.target;
+      if (t.__typename === "Tag" && t.target) out.push({ name: n.name, sha: t.target.oid, date: t.tagger?.date ?? null, message: t.message ?? "" });
+      else out.push({ name: n.name, sha: t.oid, date: t.committedDate ?? null, message: "" });
+    }
+    if (!pageInfo.hasNextPage || pageInfo.endCursor === null) return out; // a null cursor would restart at page one
+    cursor = pageInfo.endCursor;
+  }
+}
+
+/** Reads blobs by SHA (at most 8 at a time). Paths under `appcontent/` come back as bytes, all others as UTF-8 text with their BOM kept. */
+export async function readBlobs(c: GitHubClient, repo: string, items: BlobRef[]): Promise<FileMap> {
+  if (items.length > MAX_BLOBS_PER_CALL) throw new Error("Too many blobs in one call");
+  const out: FileMap = new Map();
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+  let next = 0;
+  let failed = false;
+  async function worker(): Promise<void> {
+    while (!failed && next < items.length) {
+      const { path, sha } = items[next++];
+      try {
+        const res = await c.rest<{ content: string }>("GET", `/repos/${repo}/git/blobs/${sha}`);
+        const bytes = Uint8Array.from(atob(res.content.replace(/\s/g, "")), (ch) => ch.charCodeAt(0));
+        out.set(path, path.startsWith("appcontent/") ? bytes : decoder.decode(bytes));
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_BLOB_READS, items.length) }, worker));
+  return out;
 }
 
 export function isValidRefName(name: string): boolean {
