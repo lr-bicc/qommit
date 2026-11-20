@@ -33,6 +33,14 @@ export interface LinkCache {
   setUnlinked(key: string, value: boolean): Promise<void>;
 }
 
+/** Written before the app is changed and cleared after it was saved; a leftover entry marks an interrupted update. */
+export interface JournalEntry { appId: string; repo: string; branch: string; target: string; backupBranch: string | null; total: number; startedAt: string }
+export interface UpdateJournal {
+  get(appId: string): Promise<JournalEntry | null>;
+  set(entry: JournalEntry): Promise<void>;
+  clear(appId: string): Promise<void>;
+}
+
 export interface FlowPorts { app: AppPort; github: GitHubPort; cache: LinkCache; repoPrefix: string; now(): Date }
 
 export type FlowErrorCode =

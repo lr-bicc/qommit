@@ -2,7 +2,7 @@ import { gitBlobSha } from "../../src/core/git-hash";
 import { findBranchForApp, parseBranchTable } from "../../src/core/repo-layout";
 import type { Action, AppObjectGroup } from "../../src/core/update-planner";
 import type { AppSnapshot, FileContent, FileMap, GenericProps, PropertyTree } from "../../src/core/types";
-import type { AppInfo, AppPort, FlowPorts, LinkCache, ServerPort } from "../../src/ext/flows/ports";
+import type { AppInfo, AppPort, FlowPorts, JournalEntry, LinkCache, ServerPort, UpdateJournal } from "../../src/ext/flows/ports";
 import { GatewayError, type GitHubPort } from "../../src/ext/shared/github-port";
 import type { BlobRef, CommitInfo, TagInfo } from "../../src/github/repo";
 import type { LinkData } from "../../src/qlik/link";
@@ -358,4 +358,14 @@ export function fakePorts(init: Parameters<typeof fakeApp>[0] = {}): {
   const app = fakeApp(init);
   const cache = fakeCache();
   return { ports: { app, github, cache, repoPrefix: "", now: () => new Date("2026-01-02T03:04:05Z") }, github, app, cache };
+}
+
+export function memoryJournal(): UpdateJournal & { entries: Map<string, JournalEntry> } {
+  const entries = new Map<string, JournalEntry>();
+  return {
+    entries,
+    async get(appId) { const e = entries.get(appId); return e ? { ...e } : null; },
+    async set(entry) { entries.set(entry.appId, { ...entry }); },
+    async clear(appId) { entries.delete(appId); },
+  };
 }
