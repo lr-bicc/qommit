@@ -9,6 +9,7 @@ export interface FakeApp {
   bookmarks: { props: GenericProps; approved?: boolean }[];
   variables: { props: GenericProps; list?: { qIsScriptCreated?: boolean; qIsReserved?: boolean } }[];
   libraryFiles: string[]; // qUrl values of the app-specific content library
+  saved?: number; // number of doSave calls
 }
 export interface FakeDoc extends EngineApi { }
 
@@ -75,6 +76,11 @@ export function fakeDoc(app: FakeApp): {
       getProperties: () => call("getProperties", id, () => clone(h.get())),
       getFullPropertyTree: () => call("getFullPropertyTree", id, () => clone({ qProperty: h.get(), qChildren: h.children() })),
       setProperties: (p: GenericProps) => call("setProperties", id, () => { h.set(clone(p)); }),
+      setFullPropertyTree: (tree: PropertyTree) => call("setFullPropertyTree", id, () => {
+        h.set(clone(tree.qProperty));
+        const o = app.objects.find((x) => idOf(x.props) === id);
+        if (o) o.children = clone(tree.qChildren);
+      }),
     };
   }
   const opener = (method: string, what: string, exists: (id: string) => boolean) => (id: string) =>
@@ -129,6 +135,18 @@ export function fakeDoc(app: FakeApp): {
     throw { code: 1, message: "unsupported session object definition" };
   }
 
+  const creator = (method: string, list: GenericProps[], props: GenericProps) => call(method, idOf(props), () => {
+    list.push(clone(props));
+    return handle(idOf(props), find(idOf(props))!);
+  });
+  const remover = (method: string, what: string, id: string, props: () => GenericProps[], splice: (i: number) => unknown) =>
+    call(method, id, () => {
+      const i = props().findIndex((p) => idOf(p) === id);
+      if (i < 0) throw unknown(what, id);
+      splice(i);
+      return true;
+    });
+
   const doc: FakeDoc = {
     getAllInfos: () => call("getAllInfos", undefined, () => allInfos()),
     getObject: opener("getObject", "object", () => true),
@@ -165,15 +183,28 @@ export function fakeDoc(app: FakeApp): {
       return { qItems: app.libraryFiles.map((qUrl) => ({ qUrl })) };
     }),
     createObject: (props: GenericProps) => call("createObject", idOf(props), () => {
+      if (find(idOf(props))) throw { code: 11, message: `object already exists: ${idOf(props)}` };
       app.objects.push({ props: clone(props) });
       return handle(idOf(props), find(idOf(props))!);
     }),
+    // Like the engine, destroying an absent object rejects with "object not found" (code 2).
     destroyObject: (id: string) => call("destroyObject", id, () => {
       const i = app.objects.findIndex((o) => idOf(o.props) === id);
       if (i < 0) throw unknown("object", id);
       app.objects.splice(i, 1);
       return true;
     }),
+    createVariableEx: (props: GenericProps) => call("createVariableEx", idOf(props), () => {
+      app.variables.push({ props: clone(props) });
+      return handle(idOf(props), find(idOf(props))!);
+    }),
+    destroyVariableById: (id: string) => remover("destroyVariableById", "variable", id, () => app.variables.map((v) => v.props), (i) => app.variables.splice(i, 1)),
+    createDimension: (props: GenericProps) => creator("createDimension", app.dimensions, props),
+    destroyDimension: (id: string) => remover("destroyDimension", "dimension", id, () => app.dimensions, (i) => app.dimensions.splice(i, 1)),
+    createMeasure: (props: GenericProps) => creator("createMeasure", app.measures, props),
+    destroyMeasure: (id: string) => remover("destroyMeasure", "measure", id, () => app.measures, (i) => app.measures.splice(i, 1)),
+    setScript: (script: string) => call("setScript", undefined, () => { app.script = script; }),
+    doSave: () => call("doSave", undefined, () => { app.saved = (app.saved ?? 0) + 1; }),
   };
 
   return {
