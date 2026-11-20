@@ -2,8 +2,10 @@ import type { ChangeKind, ObjectGroup, Part } from "../../core/diff";
 import type { ChangeItem } from "../flows/local-changes";
 
 export type SectionKey = ChangeKind;
-export interface ChangeGroup { label: string; items: ChangeItem[] }
-export interface ChangeSection { key: SectionKey; label: string; groups: ChangeGroup[] }
+/** The minimum an entry needs to be listed in sections; shared by the panel and the diff overlay. */
+export interface Listable { kind: ChangeKind; group: ObjectGroup; title: string; path: string }
+export interface ChangeGroup<T extends Listable = ChangeItem> { label: string; items: T[] }
+export interface ChangeSection<T extends Listable = ChangeItem> { key: SectionKey; label: string; groups: ChangeGroup<T>[] }
 
 const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: "added", label: "Added objects" },
@@ -29,17 +31,17 @@ export const PARTS: { part: Part; label: string }[] = [
   { part: "files", label: "Attached files" },
 ];
 
-const byTitle = (a: ChangeItem, b: ChangeItem): number => {
+const byTitle = (a: Listable, b: Listable): number => {
   const x = a.title.toLowerCase();
   const y = b.title.toLowerCase();
   return x < y ? -1 : x > y ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 };
 
 /** The changes as the panel lists them; empty sections and groups are left out. */
-export function sections(items: ChangeItem[]): ChangeSection[] {
-  const result: ChangeSection[] = [];
+export function sections<T extends Listable>(items: T[]): ChangeSection<T>[] {
+  const result: ChangeSection<T>[] = [];
   for (const section of SECTIONS) {
-    const groups: ChangeGroup[] = [];
+    const groups: ChangeGroup<T>[] = [];
     for (const group of GROUPS) {
       const members = items.filter((i) => i.kind === section.key && group.groups.includes(i.group)).sort(byTitle);
       if (members.length > 0) groups.push({ label: group.label, items: members });

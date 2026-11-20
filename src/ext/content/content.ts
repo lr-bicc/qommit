@@ -6,6 +6,7 @@ import type { LinkCache } from "../flows/ports";
 import type { Command, ProgressEvent } from "../shared/commands";
 import { createGitHubPort, type GatewayRequest, type GatewayResponse } from "../shared/github-port";
 import { loadOptions } from "../shared/options";
+import { showDiffOverlay } from "./overlay/show";
 import { createJournal } from "./journal";
 import { createRouter } from "./router";
 import { createServerPort } from "./server-port";
@@ -42,9 +43,6 @@ const cache: LinkCache = {
   },
 };
 
-/** Replaced by the diff overlay in a later task. */
-function showDiff(): void {}
-
 function start(): void {
   const qlik = { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init), create: enigma.create as unknown as EnigmaCreate };
   const github = createGitHubPort((request: GatewayRequest) =>
@@ -64,7 +62,7 @@ function start(): void {
       openSession: (l) => openSession(l, qlik),
       fetch: (input, init) => fetch(input, init),
     }),
-    showDiff,
+    showDiff: showDiffOverlay,
     emit: (event: ProgressEvent) => {
       // rejects when no panel is open
       chrome.runtime.sendMessage({ target: "panel", event }).catch(() => {});
