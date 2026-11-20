@@ -37,7 +37,8 @@ export interface FlowPorts { app: AppPort; github: GitHubPort; cache: LinkCache;
 
 export type FlowErrorCode =
   | "published" | "not-linked" | "branch-exists" | "branch-not-found" | "invalid-branch-name" | "repo-exists"
-  | "repo-not-found" | "nothing-to-commit" | "message-required";
+  | "repo-not-found" | "nothing-to-commit" | "message-required"
+  | "invalid-target" | "update-failed" | "cannot-write" | "tag-exists" | "invalid-tag-name" | "import-failed";
 
 export class FlowError extends Error {
   constructor(public code: FlowErrorCode, message: string, public detail?: unknown) {
