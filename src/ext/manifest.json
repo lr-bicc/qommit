@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Qommit",
+  "version": "0.1.0",
+  "description": "Version control for Qlik Sense apps with GitHub.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "scripting", "sidePanel"],
+  "host_permissions": ["https://api.github.com/*", "https://codeload.github.com/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "sw.js", "type": "module" },
+  "action": { "default_title": "Qommit" },
+  "side_panel": { "default_path": "panel.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

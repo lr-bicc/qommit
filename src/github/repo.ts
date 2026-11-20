@@ -1,12 +1,16 @@
 import type { FileContent } from "../core/types";
 import { GitHubError } from "./errors";
 import type { GitHubClient } from "./client";
+import type { RepoRef } from "./snapshot";
+import { QOMMIT_TOPIC } from "../core/repo-layout";
 
 export interface CommitInfo { sha: string; message: string; author: string; date: string }
 export interface TagInfo { name: string; sha: string }
 export interface FileChange { path: string; content: FileContent | null } // null = delete
 
 const MAX_CONCURRENT_BLOBS = 5;
+/** Largest text (in UTF-8 bytes) sent inline, and the most inline content one tree request carries. */
+const MAX_INLINE_BYTES = 1_000_000;
 
 /** Encodes each path segment but keeps the slashes (branch names may contain `/`). */
 function encodePath(p: string): string {
@@ -58,34 +62,78 @@ export async function createBranch(c: GitHubClient, repo: string, name: string, 
   await c.rest("POST", `/repos/${repo}/git/refs`, { ref: `refs/heads/${name}`, sha: fromSha });
 }
 
-export async function commitFiles(c: GitHubClient, repo: string,
-  input: { branch: string; parentSha: string; message: string; changes: FileChange[] }): Promise<string> {
-  if (input.changes.length === 0) throw new Error("Nothing to commit");
-  const parent = await c.rest<{ tree: { sha: string } }>("GET", `/repos/${repo}/git/commits/${input.parentSha}`);
+type TreeEntry =
+  | { path: string; mode: "100644"; type: "blob"; content: string }
+  | { path: string; mode: "100644"; type: "blob"; sha: string | null };
 
-  const entries: { path: string; mode: "100644"; type: "blob"; sha: string | null }[] = new Array(input.changes.length);
+/**
+ * Text up to MAX_INLINE_BYTES travels inline in the tree requests; binary content and larger text
+ * are uploaded as blobs first. Trees are chained so no request carries more than MAX_INLINE_BYTES
+ * of inline content. The branch only moves with the final ref update.
+ *
+ * `replaceRoot` replaces a first commit (one without parents, such as the one GitHub creates with `auto_init`)
+ * instead of building on it: the new commit has no parents and the branch is forced onto it.
+ */
+export async function commitFiles(c: GitHubClient, repo: string,
+  input: { branch: string; parentSha: string; message: string; changes: FileChange[]; replaceRoot?: boolean }): Promise<string> {
+  if (input.changes.length === 0) throw new Error("Nothing to commit");
+  const parent = await c.rest<{ tree: { sha: string }; parents?: unknown[] }>("GET", `/repos/${repo}/git/commits/${input.parentSha}`);
+  if (input.replaceRoot && (parent.parents ?? []).length !== 0) throw new Error(`${input.parentSha} is not the first commit`);
+
+  const encoder = new TextEncoder();
+  const entries: TreeEntry[] = new Array(input.changes.length);
+  const inlineBytes: number[] = new Array(input.changes.length).fill(0);
+  const uploads: number[] = [];
+  input.changes.forEach(({ path, content }, i) => {
+    if (content === null) {
+      entries[i] = { path, mode: "100644", type: "blob", sha: null };
+    } else if (typeof content === "string") {
+      const bytes = encoder.encode(content).length;
+      if (bytes <= MAX_INLINE_BYTES) {
+        entries[i] = { path, mode: "100644", type: "blob", content };
+        inlineBytes[i] = bytes;
+      } else {
+        uploads.push(i);
+      }
+    } else {
+      uploads.push(i);
+    }
+  });
+
   let next = 0;
   async function worker(): Promise<void> {
-    while (next < input.changes.length) {
-      const i = next++;
+    while (next < uploads.length) {
+      const i = uploads[next++];
       const { path, content } = input.changes[i];
-      if (content === null) {
-        entries[i] = { path, mode: "100644", type: "blob", sha: null };
-        continue;
-      }
       const body = typeof content === "string"
         ? { content, encoding: "utf-8" }
-        : { content: toBase64(content), encoding: "base64" };
+        : { content: toBase64(content as Uint8Array), encoding: "base64" };
       const blob = await c.rest<{ sha: string }>("POST", `/repos/${repo}/git/blobs`, body);
       entries[i] = { path, mode: "100644", type: "blob", sha: blob.sha };
     }
   }
-  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_BLOBS, input.changes.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_BLOBS, uploads.length) }, worker));
 
-  const tree = await c.rest<{ sha: string }>("POST", `/repos/${repo}/git/trees`, { base_tree: parent.tree.sha, tree: entries });
+  let treeSha = parent.tree.sha;
+  let batch: TreeEntry[] = [];
+  let batchBytes = 0;
+  const flush = async (): Promise<void> => {
+    const tree = await c.rest<{ sha: string }>("POST", `/repos/${repo}/git/trees`, { base_tree: treeSha, tree: batch });
+    treeSha = tree.sha;
+    batch = [];
+    batchBytes = 0;
+  };
+  for (let i = 0; i < entries.length; i++) {
+    if (batch.length > 0 && batchBytes + inlineBytes[i] > MAX_INLINE_BYTES) await flush();
+    batch.push(entries[i]);
+    batchBytes += inlineBytes[i];
+  }
+  await flush();
+
   const commit = await c.rest<{ sha: string }>("POST", `/repos/${repo}/git/commits`,
-    { message: input.message, tree: tree.sha, parents: [input.parentSha] });
-  await c.rest("PATCH", `/repos/${repo}/git/refs/heads/${encodePath(input.branch)}`, { sha: commit.sha, force: false });
+    { message: input.message, tree: treeSha, parents: input.replaceRoot ? [] : [input.parentSha] });
+  await c.rest("PATCH", `/repos/${repo}/git/refs/heads/${encodePath(input.branch)}`,
+    { sha: commit.sha, force: input.replaceRoot === true });
   return commit.sha;
 }
 
@@ -122,4 +170,38 @@ export function isValidRefName(name: string): boolean {
   if (/[/.]$/.test(name) || name.endsWith(".lock")) return false;
   if (name.split("/").some((s) => s.startsWith("."))) return false;
   return true;
+}
+
+export async function getRepo(c: GitHubClient, repo: string): Promise<RepoRef | null> {
+  try {
+    const res = await c.rest<{ full_name: string; default_branch: string }>("GET", `/repos/${repo}`);
+    return { repo: res.full_name, defaultBranch: res.default_branch };
+  } catch (e) {
+    if (e instanceof GitHubError && e.kind === "not-found") return null;
+    throw e;
+  }
+}
+
+/** Adds the Qommit topic to the repository, keeping its other topics. Writes nothing when it is already set. */
+export async function markRepo(c: GitHubClient, repo: string): Promise<void> {
+  const { names } = await c.rest<{ names: string[] }>("GET", `/repos/${repo}/topics`);
+  if (names.includes(QOMMIT_TOPIC)) return;
+  await c.rest("PUT", `/repos/${repo}/topics`, { names: [...names, QOMMIT_TOPIC] });
+}
+
+/** Reads a text file at `ref`; null when it does not exist. Decodes Base64 without Buffer. */
+export async function readTextFile(c: GitHubClient, repo: string, ref: string, path: string): Promise<string | null> {
+  try {
+    const res = await c.rest<{ content: string }>("GET", `/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`);
+    const binary = atob(res.content.replace(/\s/g, ""));
+    return new TextDecoder("utf-8").decode(Uint8Array.from(binary, (ch) => ch.charCodeAt(0)));
+  } catch (e) {
+    if (e instanceof GitHubError && e.kind === "not-found") return null;
+    throw e;
+  }
+}
+
+export async function whoAmI(c: GitHubClient): Promise<{ login: string }> {
+  const res = await c.rest<{ login: string }>("GET", "/user");
+  return { login: res.login };
 }

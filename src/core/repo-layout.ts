@@ -22,6 +22,9 @@ function normalizeSlug(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** GitHub topic that marks a repository as a Qlik app repository maintained with Qommit. */
+export const QOMMIT_TOPIC = "qommit";
+
 export function repoSlug(appName: string, prefix = ""): string {
   const base = normalizeSlug(appName) || "app";
   return normalizeSlug(prefix + base).slice(0, MAX_SLUG_LENGTH).replace(/-+$/, "");
@@ -128,7 +131,9 @@ export function upsertBranchRow(readme: string, row: { branch: string; appUrl: s
 }
 
 export function canonicalAppId(rows: BranchRow[], defaultBranch: string): string | null {
-  return rows.find(r => r.branch === defaultBranch)?.appId ?? null;
+  return rows.find(r => r.branch === defaultBranch)?.appId
+    ?? rows.find(r => r.appId !== null)?.appId
+    ?? null;
 }
 
 export function findBranchForApp(rows: BranchRow[], appId: string): string | null {

@@ -38,6 +38,6 @@ test("an app survives serialize -> zipball -> download -> validate -> deserializ
   expect(diffTrees(await shaMap(serialized), await shaMap(downloaded))).toEqual([]);
   expect(downloaded.get("appcontent/data.bin")).toEqual(new Uint8Array([0, 255, 254, 128, 10, 13, 0xc3]));
 
-  const target = deserializeApp(downloaded, { targetAppId: APP_ID, knownAppIds: [CANON_ID] });
+  const target = deserializeApp(downloaded, { targetAppId: APP_ID });
   expect(planUpdate(current, target, ALL)).toEqual([]);
 });

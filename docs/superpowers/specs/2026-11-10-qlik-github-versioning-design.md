@@ -1,8 +1,8 @@
 # Design: Qommit – Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
 - **Name des Tools:** Qommit (Paket- und Repo-Name `qommit`, Repo `lr-bicc/qommit`)
-- **Datum:** 2026-11-13 (Revision 9)
-- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike; sie sind in Abschnitt 11 aufgelistet.
+- **Datum:** 2026-11-16 (Revision 11)
+- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12), Revision 11 die Änderungen aus der Abnahme von Plan 2 (Abschnitt 13).
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
 - **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
 
@@ -61,7 +61,7 @@ Die Qlik Engine API (WebSocket) prüft den `Origin`-Header gegen die Host-Whitel
 | Service Worker | Hintergrund | Einziger Halter des Tokens; GitHub-Client; öffnet das Side Panel beim Klick auf das Extension-Icon. Hält keinen Zustand im Speicher. |
 | Content Script | Qlik-Seite, isolierte Welt | Engine-Zugriff via enigma.js; liest und schreibt statische Dateien; führt Update-Pläne aus; zeigt Diff-Overlay in Shadow DOM |
 
-**Side Panel:** Benötigt Chrome 116 oder neuer. Tabs der eingetragenen Qlik-Server erhalten ihr eigenes Panel; es zeigt immer den Stand des Tabs, zu dem es gehört. Auf allen anderen Tabs zeigt das Panel nur den Hinweis, dass der Server in den Optionen eingetragen sein muss, mit einem Link dorthin.
+**Side Panel:** Benötigt Chrome 116 oder neuer. Tabs der eingetragenen Qlik-Server erhalten ihr eigenes Panel; es zeigt immer den Stand des Tabs, zu dem es gehört. Auf allen anderen Tabs zeigt das Panel nur den Hinweis, dass der Server in den Optionen eingetragen sein muss, mit einem Link dorthin. Ob der Tab einen eingetragenen Server zeigt, entscheidet das Panel selbst und prüft es bei jedem Seitenwechsel des Tabs und jeder Änderung der Optionen neu: Ein Panel, das während der Anmeldeumleitung geöffnet wurde, wechselt zu Qommit, sobald der Tab beim Server ankommt. Zeigt der Tab eine andere App als zuvor, lädt das Panel neu. Jeder Befehl, der etwas ändert, nennt die App, die das Panel zeigt, und wird abgelehnt, wenn der Tab inzwischen eine andere zeigt.
 
 **Engine-Zugriff aus dem Content Script:** Netzwerkzugriffe eines Content Scripts laufen unter dem Origin der Seite, also mit deren Cookie und einem Origin, den der Virtual Proxy akzeptiert. Der Spike (Abschnitt 9) bestätigt das für WebSockets; schlägt er fehl, wandert nur der Engine-Zugriff in ein Main-World-Skript.
 
@@ -93,7 +93,9 @@ TypeScript, Manifest V3, esbuild, Preact (Side Panel und Optionsseite), enigma.j
 ## 4. Repo-Format
 
 ### 4.1 Benennung
-Repo-Name = App-Name als Slug (Kleinbuchstaben, Umlaute transliteriert, alles außer `a-z0-9` → `-`, mehrfache `-` zusammengefasst, max. 80 Zeichen), optional mit Präfix aus den Optionen. Beispiel: „Supply Chain Performance“ → `supply-chain-performance`. Bei Kollision werden `-<erste 8 Zeichen der App-ID>` angehängt. Repos werden **privat**, mit Default-Branch `main` und mit `auto_init: true` angelegt, weil die Git Data API auf einem leeren Repo mit `409` antwortet.
+Repo-Name = App-Name als Slug (Kleinbuchstaben, Umlaute transliteriert, alles außer `a-z0-9` → `-`, mehrfache `-` zusammengefasst, max. 80 Zeichen), optional mit Präfix aus den Optionen. Beispiel: „Supply Chain Performance“ → `supply-chain-performance`. Bei Kollision werden `-<erste 8 Zeichen der App-ID>` angehängt. Repos werden **privat**, mit Default-Branch `main` und mit `auto_init: true` angelegt, weil die Git Data API auf einem leeren Repo mit `409` antwortet. Der erste Commit der Extension („Initial commit“ mit allen Dateien) ersetzt den Commit, den GitHub dabei anlegt; er hat keinen Vorgänger, der Default-Branch wird einmalig darauf gesetzt (nur wenn der bisherige Commit selbst keinen Vorgänger hat). Das Repo beginnt so mit genau einem Commit.
+
+**Kennzeichen:** Repos, die mit Qommit gepflegt werden, tragen das GitHub-Topic `qommit`. Die Extension setzt es beim Anlegen eines Repos und bei jedem Create Branch, Connect und Save changes; vorhandene Topics bleiben erhalten. Das Setzen braucht die Admin-Rolle am Repo; fehlt sie, läuft die Aktion trotzdem, das Repo fehlt dann nur in der gefilterten Liste (6.2). Das Topic hängt am Repo, nicht am Inhalt; Dateien und Repo-Format bleiben unverändert. Die 29 gitoqlok-Repos der Org wurden am 2026-11-16 einmalig markiert.
 
 ### 4.2 Dateistruktur (wie gitoqlok)
 ```
@@ -153,15 +155,18 @@ Die Extension legt in jeder verknüpften App ein verstecktes generisches Objekt 
 - `syncedSha` ist der Commit, auf dem die App steht: der letzte eigene Commit oder der Commit, auf den zuletzt aktualisiert wurde. Er trennt lokale Änderungen (App gegen `syncedSha`) von neuen Commits (`syncedSha` gegen Branch-HEAD). Nach einem Update auf einen älteren Commit meldet das Panel deshalb wie gitoqlok „Repository has N new commits“.
 - gitoqlok arbeitet nach demselben Prinzip: Es legt in der App ein generisches Objekt mit `qId` und `qType` `_gitoqlikMetaData` ab; die Angaben (Repo, letzter Commit) liegen darin unter `_data.infoByServerType.github` (Spike). Die Extension liest daraus das Repo (`full_name`) und den letzten Commit (`lastCommitId`). Den Branch entnimmt sie der Branch-Tabelle des Repos; steht die App dort nicht, gilt sie als Kopie einer versionierten App.
 - Lässt sich das Objekt nicht anlegen (veröffentlichte App, fehlende Rechte), liegen dieselben Angaben in `chrome.storage.local`; die Erkennung von Kopien entfällt dann.
+- **Unlink** entfernt das Link-Objekt und merkt sich in `chrome.storage.local`, dass die App getrennt wurde. Solange die App kein Link-Objekt hat, sucht die Extension dann nicht mehr nach einem Repo für sie; die Zeile in der Branch-Tabelle bleibt stehen. Ein erneutes Verbinden hebt das auf.
+
+**Übernommener Commit:** gitoqloks letzter Commit hinkt Merges hinterher, die über die QMC veröffentlicht wurden (bei `supply-chain-performance` stand er vor dem Merge von PR #31, obwohl die veröffentlichte App ihn enthielt). Übernimmt die Extension einen solchen Commit oder den einer Kopie, prüft sie deshalb einmalig, ob die App den neueren Stand schon enthält: Für jede gepflegte Datei, die sich zwischen diesem Commit und dem Branch-HEAD geändert hat, wird die App mit dem HEAD verglichen. Gleiche Blob-Prüfsumme genügt; sonst wird die JSON-Datei geladen und nach Angleichen der App-IDs in Datei-URLs und ohne `qMeta` in `_ColorMapModel` verglichen. Skripterzeugte Variablen zählen nicht. Stimmt alles überein, ist `syncedSha` der Branch-HEAD; bei jedem Zweifel (mehr als 50 nötige Downloads, unlesbare Datei, unbekannter Commit) bleibt es beim übernommenen Commit. Dieselbe Prüfung bestimmt bei einer veröffentlichten App den angezeigten Commit „Published from commit“, verglichen mit dem HEAD ihres Branches (Default-Branch, wenn die App in keiner Zeile der Branch-Tabelle steht). Weil dort nichts gespeichert wird, läuft sie bei jedem Laden des Status.
 
 ### Im Repo: Branch-Tabelle in README.md
-Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik application` mit der URL der App je Branch. Die Extension ergänzt beim Anlegen eines Branches eine Zeile (Commit „Update branches table“ auf dem Default-Branch; ist dieser geschützt, auf dem neuen Branch). Pro Branch-Name gibt es genau eine Zeile; eine vorhandene Zeile gleichen Namens wird ersetzt.
+Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik application` mit der URL der App je Branch. Die Extension ergänzt beim Anlegen eines Branches eine Zeile (Commit „Update branches table“ auf dem Default-Branch; ist dieser geschützt, auf dem neuen Branch). Pro Branch-Name gibt es genau eine Zeile; eine vorhandene Zeile gleichen Namens wird ersetzt. Ausnahme ist die Zeile des Default-Branches: Sobald sie eine App nennt, bleibt sie unverändert, weil ihre App-ID die feste Marke für alle Datei-URLs des Repos ist (4.3); eine weitere App, die mit dem Default-Branch verbunden wird, ist nur über ihr Link-Objekt verknüpft. Lehnt GitHub die Zeile ab, weil jeder Branch, der sie tragen könnte, geschützt ist, entfällt die Zeile, und die App wird trotzdem verknüpft.
 
 ### Auflösung beim Öffnen einer App
 1. Link-Objekt mit passender `appId` → verknüpft.
 2. Link-Objekt mit fremder `appId` in einer unveröffentlichten App → Kopie einer versionierten App (Ablauf 6.3).
 3. Link-Objekt in einer veröffentlichten App → Nur-Lese-Ansicht: Repo, Branch und Commit, aus dem veröffentlicht wurde, sowie Abweichungen der App von diesem Commit. Änderungen sind hier nicht möglich; das Panel verweist auf das Duplizieren.
-4. Kein Link-Objekt → lokaler Cache; sonst das Repo aus `_gitoqlikMetaData` der App; sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Steht die App in der Branch-Tabelle des gefundenen Repos → Link-Objekt wird angelegt; `syncedSha` ist der letzte Commit aus den gitoqlok-Angaben, sofern er in der Historie des Branches liegt, sonst der Branch-HEAD. Nennen die gitoqlok-Angaben ein Repo, in dessen Tabelle die App nicht steht → Kopie einer versionierten App (Ablauf 6.3, ohne bekannten Quell-Branch). So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
+4. Kein Link-Objekt → lokaler Cache; sonst das Repo aus `_gitoqlikMetaData` der App; sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Steht die App in der Branch-Tabelle des gefundenen Repos → Link-Objekt wird angelegt; `syncedSha` ist der letzte Commit aus den gitoqlok-Angaben, sofern er in der Historie des Branches liegt, sonst der Branch-HEAD. Enthält die App bereits den Stand des Branch-HEADs (siehe „Übernommener Commit“ unten), ist es der Branch-HEAD. Nennen die gitoqlok-Angaben ein Repo, in dessen Tabelle die App nicht steht → Kopie einer versionierten App (Ablauf 6.3, ohne bekannten Quell-Branch). So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
 5. Kein Treffer → „No linked repository“ (Ablauf 6.2).
 
 Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (nach dem Merge gelöscht), meldet das Panel das und bietet **Create Branch** und **Connect to existing repository** an.
@@ -179,7 +184,7 @@ Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (na
 ### 6.2 App ohne Repo
 Das Panel zeigt „No linked repository“ mit zwei Aktionen:
 - **Create repository:** legt das Repo an (4.1), erzeugt `README.md`, committet den App-Stand als ersten Commit auf `main` und legt das Link-Objekt an.
-- **Connect to existing repository:** Dialog wie bei gitoqlok mit filterbarer Repo-Liste der Org und der Wahl „As a new branch“ (Name vorbelegt mit dem Qlik-Benutzernamen, abgezweigt vom Default-Branch) oder „To existing branch“ (Auswahlliste). Die App wird dem Branch zugeordnet (Link-Objekt, Zeile in der Branch-Tabelle). `syncedSha` wird auf den Branch-HEAD gesetzt; Unterschiede erscheinen als lokale Änderungen.
+- **Connect to existing repository:** Dialog wie bei gitoqlok mit filterbarer Repo-Liste der Org. Die Liste zeigt nur Repos mit dem Topic `qommit` (4.1); das Häkchen „Show all repositories“ zeigt alle Repos der Org, etwa ein leeres Repo, das ein Admin angelegt hat. Danach die Wahl „As a new branch“ (Name vorbelegt mit dem Qlik-Benutzernamen, abgezweigt vom Default-Branch) oder „To existing branch“ (Auswahlliste). Die App wird dem Branch zugeordnet (Link-Objekt, Zeile in der Branch-Tabelle). `syncedSha` wird auf den Branch-HEAD gesetzt; Unterschiede erscheinen als lokale Änderungen.
 
 ### 6.3 Kopie einer versionierten App: Create Branch
 Das Panel meldet „We found a repository for the master Qlik application, from which current application was duplicated“ und bietet **Create Branch**, **Unlink Repository** und **Connect to existing repository** an.
@@ -188,19 +193,19 @@ Create Branch:
 - Feld „Branch Name“, vorbelegt mit dem Qlik-Benutzernamen (z. B. `r.vasilev`); der Name wird gegen die Git-Regeln geprüft.
 - Option „Branch off from the branch that is used in the app you are duplicating from“ mit Anzeige dieses Branches. Ohne Option wird vom Default-Branch abgezweigt. Existiert der Branch der Quell-App nicht mehr, wird die Option nicht angeboten.
 - Ablauf: Zeile in der Branch-Tabelle committen → Branch auf diesen Commit anlegen → Link-Objekt der Kopie auf den neuen Branch und die eigene App-ID setzen.
-- **`syncedSha` der Kopie:** Die Kopie steht auf dem Stand ihrer Quell-App, nicht zwingend auf dem des neuen Branches. Liegt der `syncedSha` aus dem mitkopierten Link-Objekt in der Historie des neuen Branches, bleibt er erhalten; das Panel zeigt dann wie gitoqlok „Repository has N new commits“, und ein Update holt sie in die Kopie. Nur so dreht ein späterer Commit aus der Kopie keine Änderungen zurück, die inzwischen gemergt wurden. Liegt er nicht in der Historie oder fehlt er, wird `syncedSha` auf den Branch-HEAD gesetzt, und Unterschiede erscheinen als lokale Änderungen.
+- **`syncedSha` der Kopie:** Die Kopie steht auf dem Stand ihrer Quell-App, nicht zwingend auf dem des neuen Branches. Liegt der `syncedSha` aus dem mitkopierten Link-Objekt in der Historie des neuen Branches, bleibt er erhalten; das Panel zeigt dann wie gitoqlok „Repository has N new commits“, und ein Update holt sie in die Kopie. Nur so dreht ein späterer Commit aus der Kopie keine Änderungen zurück, die inzwischen gemergt wurden. Liegt er nicht in der Historie oder fehlt er, wird `syncedSha` auf den Branch-HEAD gesetzt, und Unterschiede erscheinen als lokale Änderungen. Enthält die Kopie bereits den Stand des Branch-HEADs, ist `syncedSha` ebenfalls der Branch-HEAD (Abschnitt 5, „Übernommener Commit“).
 - Existiert der Branch-Name bereits → Fehlermeldung, nichts wird geändert.
 
 ### 6.4 Local Changes
-Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; ist er neuer als `syncedSha`, zeigt der Kopf die Zahl der Commits dazwischen.
+Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; ist er neuer als `syncedSha`, zeigt der Kopf die Zahl der Commits dazwischen. Unterscheiden sich `syncedSha` und HEAD in keiner gepflegten Datei (etwa nur durch „Update branches table“ oder einen Merge ohne Änderung), gilt die App als aktuell: `syncedSha` wird stillschweigend auf den HEAD gesetzt. Dasselbe gilt vor einem Commit.
 
 ### 6.5 Save changes (Commit)
 1. „Save changes“ schaltet den Reiter in den Commit-Modus, wie bei gitoqlok:
    - „Choose what to save“ mit den Teilen Load script, App Objects, Bookmarks, Attached files. Vorausgewählt sind alle Teile mit Änderungen.
-   - Jede Gruppe und jedes einzelne Objekt in den Listen erhält ein Häkchen; so lässt sich genau wählen, was in den Commit kommt.
+   - Jede Gruppe und jedes einzelne Objekt in den Listen erhält ein Häkchen; so lässt sich genau wählen, was in den Commit kommt. Das Ladeskript wird nur als Ganzes gespeichert: Die Skript-Tabs und `tab_order.txt` werden gemeinsam an- und abgewählt, weil ein einzelner Tab ohne passende Reihenfolge einen Stand ergibt, den das Update ablehnt.
    - Pflichtfeld für die Commit-Nachricht, Schaltflächen **Save** und **Back**. Nach Erfolg zeigt die Schaltfläche „Success“, und die Liste wird neu geladen.
-2. **Steht die App nicht auf dem Branch-HEAD** (`syncedSha` ≠ HEAD), fragt die Extension vor dem Commit nach: „Update first“ (Standard) oder „Commit anyway“. Ein Commit ist ein Schnappschuss der App; auf einen neueren Stand gesetzt, dreht er dessen Änderungen zurück. „Commit anyway“ listet deshalb die Commits, die überschrieben würden, und ist der Weg, einen älteren Stand bewusst wieder zum aktuellen zu machen.
-3. Die App wird frisch gelesen. Der Service Worker lädt die gewählten geänderten Dateien als Blobs hoch (max. 5 parallel, Binärdateien base64), erzeugt den Tree auf Basis des HEAD-Trees (gelöschte Dateien mit `sha: null`), erzeugt den Commit und setzt den Branch per Fast-Forward.
+2. **Steht die App nicht auf dem Branch-HEAD** (`syncedSha` ≠ HEAD), fragt die Extension vor dem Commit nach: „Update first“ (Standard) oder „Commit anyway“. Ein Commit ist ein Schnappschuss der App; auf einen neueren Stand gesetzt, dreht er dessen Änderungen zurück. „Commit anyway“ listet deshalb die Commits, die überschrieben würden, und ist der Weg, einen älteren Stand bewusst wieder zum aktuellen zu machen. Ein Commit auf einen veralteten Stand geht nur von dieser Schaltfläche aus, einmal pro Klick; „Retry“ nach einem Fehler prüft erneut.
+3. Die App wird frisch gelesen. Der Service Worker sendet Textdateien direkt im Tree-Aufruf mit, in aufeinander aufbauenden Aufrufen von höchstens 1 MB Inhalt; nur Binärdateien und Textdateien über 1 MB lädt er vorab als Blobs hoch (max. 5 parallel, Binärdateien base64). Der erste Tree baut auf dem HEAD-Tree auf (gelöschte Dateien mit `sha: null`); danach erzeugt er den Commit und setzt den Branch per Fast-Forward. So braucht auch der erste Commit einer großen App nur wenige Aufrufe.
 4. Schlägt das Setzen des Branches fehl, weil inzwischen jemand committet hat → die Nachfrage aus Schritt 2 erscheint, nichts geht verloren.
 5. Danach `syncedSha` = neuer Commit. Nicht gewählte Änderungen bleiben als lokale Änderungen stehen. Ohne Auswahl gibt es keinen Commit.
 
@@ -245,7 +250,8 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 ### Qlik
 | Fall | Verhalten |
 |---|---|
-| Keine/abgelaufene Sitzung, WebSocket geschlossen | Hinweis, sich in Qlik neu anzumelden bzw. die Seite neu zu laden |
+| Keine/abgelaufene Sitzung, WebSocket geschlossen, Qlik antwortet nicht (Zeitgrenze: 20 s für den Verbindungsaufbau, 30 s je Engine-Aufruf, 60 s je Datei) | Hinweis, sich in Qlik neu anzumelden bzw. die Seite neu zu laden; der nächste Befehl öffnet eine neue Sitzung |
+| Ein Objekt oder eine Datei der App lässt sich nicht lesen | Der Vorgang bricht ab; das Panel nennt das Objekt. Ein unvollständiger Stand wird nie verglichen oder gespeichert. Eine Anmeldeseite an Stelle einer Datei gilt als Lesefehler. |
 | Fehlende Schreibrechte | Update gesperrt |
 | Fehler mitten im Update | Stopp beim ersten Fehler; das Panel zeigt erledigte und offene Aktionen sowie die Engine-Meldung; `syncedSha` bleibt unverändert. Die App lässt sich per Update erneut auf den Zielstand oder auf den Sicherungs-Branch bringen. |
 | Zielstand enthält fehlerhafte Dateien (z. B. nach einem falsch gelösten Merge-Konflikt) | Update startet nicht; Liste der Dateien mit Link nach GitHub |
@@ -310,3 +316,29 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 3, 7 | Panel auf Tabs nicht eingetragener Server: nur Hinweis mit Link zu den Optionen. | Abschnitt 3 und 7 widersprachen sich; ohne Host-Berechtigung sieht die Extension die Adresse des Tabs nicht. |
 | 7 | Grenze des Service Workers: feste Liste von Aufrufen, nur Repos der eingestellten Org. Die Optionsseite greift auf den Token zu. | Die Verknüpfung liegt in der App und lässt sich vom Service Worker nicht prüfen. |
 | 9 | Spike abgeschlossen, Verweis auf die Ergebnisse. | – |
+
+## 12. Änderungen in Revision 10 (aus der Umsetzung von Plan 2)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 3 | Das Panel folgt seinem Tab; ändernde Befehle nennen ihre App. | Nach einer Navigation im selben Tab hätte ein Befehl sonst eine andere App getroffen, als das Panel zeigt. |
+| 5 | Die Zeile des Default-Branches bleibt stehen, sobald sie eine App nennt. Bei geschützten Branches entfällt die Zeile, die Verknüpfung nicht. | Die App-ID dieser Zeile ist die Marke aus 4.3; ein Ersetzen hätte in allen Apps des Repos jede Datei mit Bildern als geändert gezeigt. |
+| 5 | Unlink bleibt wirksam (lokale Markierung). | Ohne sie fand die Extension die App über die Branch-Tabelle sofort wieder. |
+| 6.4, 6.5 | Kein „hinter dem Branch“, wenn sich keine gepflegte Datei unterscheidet. | Jede frische Kopie hätte beim ersten Speichern wegen „Update branches table“ nach „Commit anyway“ gefragt. |
+| 6.5 | Das Ladeskript wird als Ganzes gespeichert. „Commit anyway“ nur per eigenem Klick. | Ein Tab ohne passende `tab_order.txt` ergibt einen ungültigen Stand. |
+| 6.5 | Textdateien gehen im Tree-Aufruf mit statt als einzelne Blobs. | Der erste Commit der Referenz-App hätte rund 440 Aufrufe gebraucht und GitHubs sekundäres Limit riskiert. |
+| 7 | Zeitgrenzen für Qlik-Aufrufe; Lesefehler nennen das Objekt. | Ein hängender Aufruf hätte das Panel bis zum Neuladen der Seite gesperrt. |
+
+## 13. Änderungen in Revision 11 (aus der Abnahme von Plan 2)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 4.1, 6.2 | Repos tragen das Topic `qommit`; „Connect to existing repository“ listet nur solche Repos, „Show all repositories“ zeigt alle. | Die Liste zeigte jedes Repo der Org, auch Repos ohne Bezug zu Qlik-Apps. Die Branch-Tabelle der README als Merkmal wäre ein Format von gitoqlok im Inhalt des Default-Branches gewesen; das Topic ist eindeutig, stabil und unabhängig von Commits. |
+| 5 | Nennen gitoqloks Angaben ein Repo der Org, das GitHub nicht zeigt (gelöscht oder ohne Zugriff des Tokens), meldet das Panel „Repository not found or no access.“ statt „No linked repository“. Repos außerhalb der Org werden weiter ignoriert. | Eine frische Kopie von „Supply Chain Performance“ erschien als nicht verknüpft, weil der Token das Repo nicht sah; die Ursache war im Panel nicht erkennbar. |
+| 5, 6.3 | Übernimmt die Extension gitoqloks letzten Commit oder den einer Kopie, prüft sie gegen den Inhalt der App, ob diese den Branch-HEAD schon enthält; dann startet sie dort. | Die Kopie von „Supply Chain Performance“ meldete „Repository has 7 new commits“, obwohl die App den Merge von PR #31 enthielt; gitoqloks letzter Commit stand davor. Ohne Prüfung hätte jede erste Kopie einer gitoqlok-App beim Speichern „The branch has moved on“ gezeigt. |
+| 4.1 | „Initial commit“ ersetzt GitHubs eigenen ersten Commit aus `auto_init`, statt darauf aufzubauen. | Das neue Repo für „Sales Asia (incl. Invoice)“ begann mit zwei Commits „Initial commit“: GitHubs Commit mit einer Platzhalter-README und der Commit der Extension. Die Checkliste erwartet genau einen. |
+| 3 | Jeder Tab erhält ein Panel mit seiner Tab-ID; ob er einen eingetragenen Server zeigt, prüft das Panel selbst und laufend. | Beim Öffnen der veröffentlichten „Supply Chain Performance“ zeigte das Panel den Hinweis zu den Optionen: Es war geöffnet worden, während der Tab noch auf der Microsoft-Anmeldung stand, und Chrome lädt ein offenes Panel nicht neu, wenn sich sein Pfad ändert. |
+| 5 | Die Prüfung gegen den App-Inhalt gilt auch für den Commit, den eine veröffentlichte App als „Published from commit“ zeigt. | Die veröffentlichte „Supply Chain Performance“ zeigte gitoqloks Commit `c971ae5`, obwohl sie den Merge von PR #31 und alle späteren Änderungen enthält. |
+| 6.1 | Nennt eine veröffentlichte App ein Repo, das es nicht mehr gibt, zeigt das Panel den Nur-Lese-Hinweis und „Repository not found or no access.“, ohne „Unlink Repository“ und „Connect to existing repository“. | Die veröffentlichte „Sales Asia“ nennt in gitoqloks Angaben das gelöschte Repo `lr-bicc/sales-asia`; das Panel bot dort Unlink an, obwohl eine veröffentlichte App nur gelesen wird. |
+| 6.1 | Eine veröffentlichte App ohne Repository zeigt „No linked repository“ mit dem Nur-Lese-Hinweis, ohne „Create repository“ und „Connect to existing repository“. Die Flows lehnen beides für veröffentlichte Apps weiter ab. | Die veröffentlichte „Customs Preferences“ bot beide Schaltflächen an, die nur mit der Nur-Lese-Meldung antworteten; bei fehlendem Repo (Sales Asia) waren sie schon ausgeblendet. |
+| 6.1 | Scheitert das Laden des Status, zeigt das Panel nur die Fehlermeldung unter dem Kopf, nicht mehr die veraltete Ansicht darunter. Scheitert eine Aktion (etwa „Create repository“), bleibt ihre Ansicht stehen. | Ohne Token zeigte das Panel „No GitHub token configured.“ zweimal: oben für den Status und unten noch einmal für die Local Changes der alten Ansicht. |

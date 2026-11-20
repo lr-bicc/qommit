@@ -1,5 +1,6 @@
 import type { AppSnapshot, FileContent, FileMap, GenericProps, PropertyTree } from "./types";
 import { filesToScript } from "./script-tabs";
+import { replaceAppContentIds } from "./app-content-ids";
 
 function asText(content: FileContent): string {
   return typeof content === "string" ? content : new TextDecoder("utf-8").decode(content);
@@ -10,13 +11,8 @@ function asBytes(content: FileContent): Uint8Array {
 }
 
 /** Rebuilds a snapshot from repository files. Does not validate; unreadable JSON throws the native error. */
-export function deserializeApp(files: FileMap, opts: { targetAppId: string; knownAppIds: string[] }): AppSnapshot {
-  const denormalize = (text: string): string => {
-    let result = text;
-    for (const id of opts.knownAppIds) result = result.split(`/appcontent/${id}/`).join(`/appcontent/${opts.targetAppId}/`);
-    return result;
-  };
-  const parse = <T>(content: FileContent): T => JSON.parse(denormalize(asText(content))) as T;
+export function deserializeApp(files: FileMap, opts: { targetAppId: string }): AppSnapshot {
+  const parse = <T>(content: FileContent): T => JSON.parse(replaceAppContentIds(asText(content), opts.targetAppId)) as T;
 
   const sortedPaths = [...files.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const inDir = (dir: string) => sortedPaths.filter((p) => p.startsWith(`objects/${dir}/`) && p.endsWith(".json") && !p.slice(dir.length + 9).includes("/"));

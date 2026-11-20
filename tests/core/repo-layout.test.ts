@@ -105,6 +105,13 @@ test("appends the table after two blank lines and keeps the line ending", () => 
 
 test("canonicalAppId and findBranchForApp with missing data", () => {
   const rows = [{ branch: "dev", appUrl: "u", appId: B }];
-  expect(canonicalAppId(rows, "main")).toBeNull();
+  expect(canonicalAppId(rows, "main")).toBe(B);
+  expect(canonicalAppId([{ branch: "dev", appUrl: "u", appId: null }], "main")).toBeNull();
   expect(findBranchForApp(rows, B.toUpperCase())).toBe("dev");
+});
+
+test("canonicalAppId falls back to the first row with an app id", () => {
+  const rows = [{ branch: "x", appUrl: "u", appId: null }, { branch: "dev", appUrl: "u", appId: "id-dev" }];
+  expect(canonicalAppId(rows, "main")).toBe("id-dev");
+  expect(canonicalAppId([], "main")).toBeNull();
 });

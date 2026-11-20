@@ -23,12 +23,12 @@ test("normalizes the app id in content URLs both ways", () => {
   expect(sheet).toContain(`/appcontent/${CANON_ID}/logo.png`);
   expect(sheet).not.toContain(APP_ID);
   const other = "22222222-2222-4222-8222-222222222222";
-  const back = deserializeApp(files, { targetAppId: other, knownAppIds: [CANON_ID] });
+  const back = deserializeApp(files, { targetAppId: other });
   expect(JSON.stringify(back.sheets)).toContain(`/appcontent/${other}/logo.png`);
 });
 test("round trip keeps everything except script-created variables", () => {
   const snap = makeSnapshot();
-  const back = deserializeApp(serializeApp(snap, { canonicalAppId: CANON_ID }), { targetAppId: APP_ID, knownAppIds: [CANON_ID] });
+  const back = deserializeApp(serializeApp(snap, { canonicalAppId: CANON_ID }), { targetAppId: APP_ID });
   expect(back).toEqual({ ...snap, variables: [snap.variables[0]] });
 });
 test("serializing twice yields identical bytes", () => {
@@ -62,4 +62,20 @@ test("checks the id of every object group", () => {
     const s = makeSnapshot(); mutate(s);
     expect(() => serializeApp(s, { canonicalAppId: CANON_ID })).toThrow(`Cannot store ${group} with id "v/1"`);
   }
+});
+
+test("every app id in appcontent urls is normalised, in both directions", () => {
+  const foreign = "22222222-2222-4222-8222-222222222222";
+  const sheet = { qProperty: { qInfo: { qId: "s9", qType: "sheet" },
+    a: `/appcontent/${foreign}/a.png`, b: `/appcontent/${APP_ID}/b.png`, c: "/appcontent/not-a-guid/c.png" }, qChildren: [] };
+  const files = serializeApp({ ...makeSnapshot(), sheets: [sheet] }, { canonicalAppId: CANON_ID });
+  const text = files.get("objects/sheets/s9.json") as string;
+  expect(text).toContain(`/appcontent/${CANON_ID}/a.png`);
+  expect(text).toContain(`/appcontent/${CANON_ID}/b.png`);
+  expect(text).toContain("/appcontent/not-a-guid/c.png");
+
+  const legacy = new Map(files).set("objects/sheets/s9.json", text.split(CANON_ID).join(foreign));
+  const back = deserializeApp(legacy, { targetAppId: APP_ID });
+  expect(JSON.stringify(back.sheets)).not.toContain(foreign);
+  expect(JSON.stringify(back.sheets)).toContain(`/appcontent/${APP_ID}/a.png`);
 });

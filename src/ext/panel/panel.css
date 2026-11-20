@@ -1,0 +1,54 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.panel { min-width: 320px; min-height: 100vh; display: flex; flex-direction: column; padding: 8px 12px 0; }
+.content { flex: 1; }
+h1 { font-size: 15px; margin: 0; overflow-wrap: anywhere; }
+h2 { font-size: 14px; margin: 0 0 8px; }
+a { color: #0b66d0; }
+.header { border-bottom: 1px solid #8884; padding-bottom: 6px; margin-bottom: 8px; }
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.header-buttons { display: flex; gap: 4px; }
+.badge { background: #8883; border-radius: 10px; padding: 0 8px; font-size: 12px; }
+.notice { margin: 4px 0 0; color: #a15c00; }
+.muted { color: #888; }
+.view p { margin: 8px 0; }
+.buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+button, a.button { font: inherit; padding: 4px 10px; border: 1px solid #8886; border-radius: 4px; background: #8881; color: inherit; cursor: pointer; text-decoration: none; }
+button:hover:not(:disabled), a.button:hover { background: #8883; }
+button.primary { background: #0b66d0; border-color: #0b66d0; color: #fff; }
+button.primary:hover:not(:disabled) { background: #0953a8; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.icon { padding: 2px 7px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #0b66d0; outline-offset: 2px; }
+.error { background: #d3303018; border: 1px solid #d33030; border-radius: 4px; padding: 4px 8px; margin: 8px 0; }
+.error p { margin: 4px 0; }
+.error p.detail { font-size: 12px; color: #888; overflow-wrap: anywhere; }
+.hint { margin: 0 0 4px 18px; font-size: 12px; color: #888; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid #8884; margin-bottom: 8px; }
+.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
+.tabs button[aria-selected="true"] { border-bottom-color: #0b66d0; font-weight: 600; }
+.footer { position: sticky; bottom: 0; margin: 0 -12px; padding: 4px 12px; border-top: 1px solid #8884; background: Canvas; color: #888; font-size: 12px; }
+.overlay { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-start; justify-content: center; padding: 24px 8px; overflow: auto; }
+.dialog { background: Canvas; color: CanvasText; border-radius: 6px; padding: 12px; width: 100%; max-width: 420px; }
+.field { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; }
+.check { display: flex; gap: 6px; align-items: flex-start; margin: 8px 0; }
+input[type="text"], input[type="search"], select { font: inherit; width: 100%; padding: 4px 6px; }
+fieldset { border: 0; padding: 0; margin: 8px 0 0; }
+.repo-list { list-style: none; margin: 6px 0; padding: 0; max-height: 180px; overflow: auto; border: 1px solid #8884; border-radius: 4px; }
+.repo-list button { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; }
+.repo-list button.selected { background: #0b66d022; font-weight: 600; }
+.repo-list .muted { padding: 4px 8px; }
+h3 { font-size: 13px; margin: 12px 0 4px; }
+.section + .section { margin-top: 4px; }
+.group-header { display: flex; align-items: center; gap: 6px; }
+button.group-toggle { flex: 1; text-align: left; border: 0; background: none; padding: 2px 0; font-weight: 600; }
+.entries { list-style: none; margin: 0 0 4px 18px; padding: 0; overflow-wrap: anywhere; }
+.entries .check { margin: 2px 0; align-items: center; }
+.commit textarea { font: inherit; width: 100%; padding: 4px 6px; margin-top: 8px; resize: vertical; }
+.commit fieldset .check { margin: 2px 0; }
+.commits { list-style: none; margin: 8px 0; padding: 0; }
+.commits li { padding: 4px 0; border-bottom: 1px solid #8883; overflow-wrap: anywhere; }
+.commit-message { font-weight: 600; }
+.commit-meta { font-size: 12px; }
+.history > button { margin: 8px 0; }
