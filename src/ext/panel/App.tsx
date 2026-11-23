@@ -9,6 +9,7 @@ import { ConnectDialog } from "./ConnectDialog";
 import { CreateBranchDialog, toCommandError } from "./CreateBranchDialog";
 import { ErrorMessage } from "./ErrorMessage";
 import { Header, UnlinkDialog } from "./Header";
+import { ImportTab } from "./ImportTab";
 import { HistoryTab } from "./HistoryTab";
 import { LocalChangesTab } from "./LocalChangesTab";
 import { SetupViews } from "./SetupViews";
@@ -70,7 +71,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   const [running, setRunning] = useState(0);
   const [progress, setProgress] = useState("Ready");
   const [dialog, setDialog] = useState<DialogKind | null>(null);
-  const [tab, setTab] = useState<"changes" | "history" | "tags">("changes");
+  const [tab, setTab] = useState<"changes" | "history" | "tags" | "import">("changes");
   const [tagging, setTagging] = useState<string | null>(null); // the commit an "Add tag" dialog is open for
   const [updating, setUpdating] = useState<{ sha: string; label: string } | null>(null); // target of an update from History or Tags
   const [reloadToken, setReloadToken] = useState(0); // a new value makes the open tab load its data again
@@ -176,6 +177,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
       <section class="view">
         <p>Open an app to use Qommit.</p>
         <button type="button" disabled={busy} onClick={() => void load()}>Refresh</button>
+        <ImportTab bridge={bridge} />
       </section>
     );
   } else if (app && status) {
@@ -186,6 +188,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
             <button type="button" role="tab" aria-selected={tab === "changes"} onClick={() => setTab("changes")}>Local Changes</button>
             <button type="button" role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>History</button>
             <button type="button" role="tab" aria-selected={tab === "tags"} onClick={() => setTab("tags")}>Tags</button>
+            <button type="button" role="tab" aria-selected={tab === "import"} onClick={() => setTab("import")}>Import</button>
           </div>
           {tab === "changes"
             ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} repo={status.link.repo} onSaved={() => void load(false)} reloadToken={reloadToken}
@@ -193,7 +196,9 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
             : tab === "history"
               ? <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken}
                 canUpdate={canUpdate} onAddTag={setTagging} onUpdate={setUpdating} />
-              : <TagsTab bridge={bridge} repo={status.link.repo} canUpdate={canUpdate} onUpdate={setUpdating} reloadToken={reloadToken} />}
+              : tab === "tags"
+                ? <TagsTab bridge={bridge} repo={status.link.repo} canUpdate={canUpdate} onUpdate={setUpdating} reloadToken={reloadToken} />
+                : <ImportTab bridge={bridge} />}
         </>
       );
     } else {
