@@ -177,3 +177,30 @@ test("inside an app the import is the last tab", async () => {
   expect(await screen.findByText("Repository")).toBeTruthy();
   expect(await screen.findByRole("button", { name: REPO })).toBeTruthy();
 });
+
+test("choosing the selected repository again keeps the branch", async () => {
+  const bridge = hub();
+  render(<App bridge={bridge} />);
+  await chooseRepo();
+  fireEvent.click(screen.getByRole("button", { name: REPO }));
+  fireEvent.click(screen.getByRole("button", { name: REPO }));
+  expect((screen.getByLabelText("Branch") as HTMLSelectElement).value).toBe("main");
+  expect(importButton().disabled).toBe(false);
+  expect(bridge.commands.filter((c) => c.cmd === "listBranches").length).toBe(1);
+});
+
+test("the hub shows the progress of the import", async () => {
+  const bridge = hub();
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const original = bridge.send.bind(bridge);
+  bridge.send = (async (command: Command) => { if (command.cmd === "importApp") await gate; return original(command); }) as FakeBridge["send"];
+  render(<App bridge={bridge} />);
+  await chooseRepo();
+  fireEvent.click(importButton());
+  await waitFor(() => expect(importButton().disabled).toBe(true));
+  bridge.progress("Writing app… 2/5");
+  expect(await screen.findByText("Writing app… 2/5")).toBeTruthy();
+  release();
+  await screen.findByText("Created Sales (main)");
+});

@@ -42,6 +42,7 @@ export function ImportTab(props: { bridge: Bridge }): JSX.Element {
   useEffect(() => () => { alive.current = false; }, []);
 
   function chooseRepo(name: string): void {
+    if (name === repo) return; // the same repository again: keep what is loaded and chosen
     setRepo(name);
     setBranches(null);
     setBranch("");
