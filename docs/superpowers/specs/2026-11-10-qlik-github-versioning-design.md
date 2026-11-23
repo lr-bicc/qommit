@@ -280,7 +280,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 
 **Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft).
 
-**Für Plan 3:** Beide offenen Punkte prüft die Abnahme von Plan 3 (`docs/superpowers/acceptance/plan-3-checklist.md`, Punkte 9 und 4): Import und Vergleich einer App mit Story (Frage 6), Skript nach „Load script“ und Daten nach `DoSave` (Frage 7, Skriptteil).
+**Für Plan 3:** Beide offenen Punkte prüft die Abnahme von Plan 3 (`docs/superpowers/acceptance/plan-3-checklist.md`, Schritte 13 und 6): Import und Vergleich einer App mit Story (Frage 6), Skript nach „Load script“ und Daten nach `DoSave` (Frage 7, Skriptteil).
 
 Mehrere Annahmen lassen sich nur am echten Server prüfen. Der erste Schritt des Implementierungsplans ist ein kurzer Spike gegen den Testserver, dessen Code nicht übernommen wird:
 
@@ -358,3 +358,4 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 6.8 | Das Datum eines Tags ist das Datum des Taggers, bei leichtgewichtigen Tags das Commit-Datum. | Leichtgewichtige Tags haben keinen Tagger. |
 | 6.9 | Der App-Name stammt aus dem Titel der README, sonst aus dem Repo-Namen. | Der Repo-Name entsteht aus dem App-Namen, verliert aber Zeichen und Schreibweise. |
 | 10 | „Mehrdeutige Zuordnung einer App (eine App in zwei Branch-Tabellen) anzeigen“ ist ein offener Punkt. | Die Auflösung nimmt die erste Zuordnung; ein Hinweis auf weitere gehört nicht mehr in Plan 3. |
+| 6.6, 6.9 | Ein Update ohne Änderungen schließt ein unterbrochenes Update ab (Speichern, Journal leeren) und setzt `syncedSha` auf den Zielstand, wenn dieser auf dem Branch liegt; der Dialog bietet dann „Update“ statt „Close“. Scheitert „Import“ schon beim Anlegen der App, lautet die Meldung „The app could not be created.“ mit der Meldung der Engine. | Ein Update, das nur Dateien betrifft, die es nie schreibt, ließ „Repository has N new commits“ und den Hinweis auf ein unterbrochenes Update für immer stehen; „The new app was created“ war bei einer fehlgeschlagenen Anlage falsch. |
