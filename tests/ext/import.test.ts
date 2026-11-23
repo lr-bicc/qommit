@@ -109,3 +109,21 @@ test("a creation failure without an app id reports no app", async () => {
   expect(err.code).toBe("import-failed");
   expect(err.detail).toEqual({ appId: null, url: null });
 });
+
+test("a close that never settles does not block the result", async () => {
+  const { github, server, sha } = setup();
+  const create = server.createApp.bind(server);
+  server.createApp = async (name) => ({ ...(await create(name)), close: () => new Promise<void>(() => {}) });
+  const result = await importApp({ github, server }, input(sha));
+  expect(result.appId).toBe(NEW_ID);
+});
+
+test("a close that never settles does not block a failure", async () => {
+  const { github, server, sha } = setup();
+  server.failNextApplyAt(1, "engine said no");
+  const create = server.createApp.bind(server);
+  server.createApp = async (name) => ({ ...(await create(name)), close: () => new Promise<void>(() => {}) });
+  const err = await importApp({ github, server }, input(sha)).catch((e) => e);
+  expect(err.code).toBe("import-failed");
+  expect(err.message).toBe("engine said no");
+});

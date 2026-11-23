@@ -20,7 +20,8 @@ export function createServerPort(loc: QlikLocation, deps: ServerPortDeps): Serve
       try {
         appId = await createApp(g.global, name);
       } finally {
-        await g.close();
+        // Closing may never settle on a dead socket; it must not block the result.
+        try { void Promise.resolve(g.close()).catch(() => {}); } catch { /* already closed */ }
       }
       const appLoc = { ...loc, appId };
       let session: EngineSession;

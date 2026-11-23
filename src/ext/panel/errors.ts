@@ -36,7 +36,11 @@ export function errorText(error: CommandError): ErrorText {
     case "cannot-write": return { text: "You have no permission to change this app." };
     case "tag-exists": return { text: "Tag already exists." };
     case "invalid-tag-name": return { text: "Invalid tag name." };
-    case "import-failed": return { text: "The import stopped. The new app was created but is incomplete." };
+    case "import-failed": {
+      const appId = (error.detail as { appId?: unknown } | null | undefined)?.appId;
+      if (typeof appId === "string") return { text: "The import stopped. The new app was created but is incomplete." };
+      return { text: "The app could not be created.", detail: error.message };
+    }
     case "invalid-target": return { text: "The selected state contains files that cannot be applied." };
     case "update-failed": return { text: "The update stopped.", detail: error.message };
     default: return { text: error.message };

@@ -58,6 +58,7 @@ export async function importApp(
   } catch (e) {
     throw new FlowError("import-failed", messageOf(e), { appId, url: appId === null ? null : server.appUrl(appId) });
   } finally {
-    await close().catch(() => {});
+    // Closing may never settle on a dead socket; the result or error must not wait for it.
+    try { void Promise.resolve(close()).catch(() => {}); } catch { /* already closed */ }
   }
 }

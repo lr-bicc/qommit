@@ -50,12 +50,21 @@ test.each([
   ["cannot-write", "You have no permission to change this app."],
   ["tag-exists", "Tag already exists."],
   ["invalid-tag-name", "Invalid tag name."],
-  ["import-failed", "The import stopped. The new app was created but is incomplete."],
   ["invalid-target", "The selected state contains files that cannot be applied."],
 ])("%s (plan 3)", (code, text) => {
   const result = errorText(e(code));
   expect(result.text).toBe(text);
   expect(result.action).toBeUndefined();
+});
+
+test("import-failed with an app says it is incomplete", () => {
+  const result = errorText(e("import-failed", { detail: { appId: "new1", url: "u" } }));
+  expect(result.text).toBe("The import stopped. The new app was created but is incomplete.");
+});
+
+test("import-failed without an app says it could not be created and shows the engine message", () => {
+  expect(errorText(e("import-failed", { message: "no quota", detail: { appId: null, url: null } })))
+    .toEqual({ text: "The app could not be created.", detail: "no quota" });
 });
 
 test("update-failed shows the message as detail", () => {

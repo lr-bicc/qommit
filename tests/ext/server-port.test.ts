@@ -65,3 +65,12 @@ test("a failure to open the created app carries its id", async () => {
   deps.openSession.mockRejectedValueOnce(new Error("socket closed"));
   await expect(port.createApp("x")).rejects.toMatchObject({ message: "socket closed", appId: "new-app" });
 });
+
+test("a global session that never closes does not block the app session", async () => {
+  const { port, deps } = setup();
+  const globalApi = { createApp: vi.fn(async () => ({ qSuccess: true, qAppId: "new-app" })) } as unknown as EngineApi;
+  deps.openGlobal.mockResolvedValueOnce({ global: globalApi, close: () => new Promise<void>(() => {}) });
+  const { app } = await port.createApp("x");
+  expect(app).toBeDefined();
+  expect(deps.openSession).toHaveBeenCalledTimes(1);
+});

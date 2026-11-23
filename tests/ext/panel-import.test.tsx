@@ -153,7 +153,8 @@ test("a failed import without an app has no link", async () => {
   await chooseRepo();
   fireEvent.click(importButton());
   const alert = await screen.findByRole("alert");
-  expect(within(alert).getByText("The import stopped. The new app was created but is incomplete.")).toBeTruthy();
+  expect(within(alert).getByText("The app could not be created.")).toBeTruthy();
+  expect(within(alert).getByText("boom")).toBeTruthy();
   expect(within(alert).queryByRole("link")).toBeNull();
 });
 

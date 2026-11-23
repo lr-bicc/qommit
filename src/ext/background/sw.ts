@@ -7,7 +7,9 @@ import { wireSidePanel } from "./side-panel";
 wireSidePanel();
 
 // Content scripts keep the update journal in storage.session; it is closed to them by default.
-void chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
+chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" }).catch((e: unknown) => {
+  console.warn("[qommit] could not open the session storage to content scripts:", e instanceof Error ? e.message : String(e));
+});
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   const m = message as { target?: unknown; request?: GatewayRequest } | null;
