@@ -104,3 +104,44 @@ test("a chain of renames runs the last link first, without a temporary name", ()
   const ups = planUpdate(cur, tgt, new Set(["objects"])).filter(isUpsert);
   expect(ups.map((a) => `${a.id}:${(a.payload as GenericProps).qName}${a.temporary ? "*" : ""}`)).toEqual(["b:vZ", "a:vY"]);
 });
+
+/** Plays the plan against the variable names of `cur`; fails when two variables ever share a name. Returns the final names. */
+function playVariables(cur: AppSnapshot, tgt: AppSnapshot): Map<string, string> {
+  const names = new Map(cur.variables.map((x) => [x.qInfo.qId, String(x.qName)]));
+  const unique = (step: string): void => {
+    const seen = new Set<string>();
+    for (const name of names.values()) {
+      expect(seen.has(name), `duplicate variable name ${name} after ${step}`).toBe(false);
+      seen.add(name);
+    }
+  };
+  for (const a of planUpdate(cur, tgt, new Set(["objects"]))) {
+    if (a.op === "upsert" && a.group === "variables") names.set(a.id, String((a.payload as GenericProps).qName));
+    else if (a.op === "delete" && a.group === "variables") names.delete(a.id);
+    else continue;
+    unique(`${a.op} ${a.id}`);
+  }
+  return names;
+}
+const finalNames = (s: AppSnapshot): [string, string][] => s.variables.map((x) => [x.qInfo.qId, String(x.qName)]);
+
+test("a cycle of three renames never shares a name", () => {
+  const cur = snap({ variables: [v("a", "vX"), v("b", "vY"), v("c", "vZ")] });
+  const tgt = snap({ variables: [v("a", "vY"), v("b", "vZ"), v("c", "vX")] });
+  expect([...playVariables(cur, tgt)].sort()).toEqual(finalNames(tgt).sort());
+});
+test("a new variable that takes a name freed by a rename never shares a name", () => {
+  const cur = snap({ variables: [v("a", "vX")] });
+  const tgt = snap({ variables: [v("a", "vW"), v("n", "vX")] });
+  expect([...playVariables(cur, tgt)].sort()).toEqual(finalNames(tgt).sort());
+});
+test("a delete combined with a swap never shares a name", () => {
+  const cur = snap({ variables: [v("a", "vX"), v("b", "vY"), v("d", "vZ")] });
+  const tgt = snap({ variables: [v("a", "vY"), v("b", "vX")] });
+  expect([...playVariables(cur, tgt)].sort()).toEqual(finalNames(tgt).sort());
+});
+test("a deleted variable frees its name for a new one", () => {
+  const cur = snap({ variables: [v("d", "vX"), v("a", "vY"), v("b", "vZ")] });
+  const tgt = snap({ variables: [v("n", "vX"), v("a", "vZ"), v("b", "vY")] });
+  expect([...playVariables(cur, tgt)].sort()).toEqual(finalNames(tgt).sort());
+});
