@@ -325,11 +325,11 @@ test("onSaved is called after a successful save", async () => {
 });
 
 const commitsOf = (n: number, offset = 0) =>
-  Array.from({ length: n }, (_, i) => ({ sha: `${String(i + offset).padStart(2, "0")}abcdef0123456789`, message: `msg ${i + offset}\nbody`, author: "Ann", date: "2026-11-01T10:00:00Z" }));
+  Array.from({ length: n }, (_, i) => ({ sha: `${String(i + offset).padStart(2, "0")}abcdef0123456789`, message: `msg ${i + offset}\nbody`, author: "Ann", date: "2026-11-01T10:00:00Z", parents: [] }));
 
 test("history lists the commits and links the short sha", async () => {
   const bridge = fakeBridge({ history: [{ commits: commitsOf(2), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   await screen.findByText("msg 0");
   expect(screen.getByText("msg 1")).toBeTruthy();
   expect(screen.queryByText(/body/)).toBeNull();
@@ -339,12 +339,12 @@ test("history lists the commits and links the short sha", async () => {
   expect(link.getAttribute("href")).toBe("https://github.com/lr-bicc/sales/commit/00abcdef0123456789");
   expect(screen.queryByText("Open pull request on GitHub")).toBeNull();
   expect(screen.queryByText("Load more")).toBeNull();
-  expect(bridge.commands).toEqual([{ cmd: "history", page: 1 }]);
+  expect(bridge.commands.filter((c) => c.cmd === "history")).toEqual([{ cmd: "history", page: 1 }]);
 });
 
 test("history of a side branch links to the pull request", async () => {
   const bridge = fakeBridge({ history: [{ commits: commitsOf(1), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="dev/x" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="dev/x" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   const link = (await screen.findByText("Open pull request on GitHub")) as HTMLAnchorElement;
   expect(link.getAttribute("href")).toBe("https://github.com/lr-bicc/sales/compare/main...dev/x");
   expect(link.getAttribute("target")).toBe("_blank");
@@ -352,22 +352,22 @@ test("history of a side branch links to the pull request", async () => {
 
 test("Load more appears after a full page and appends the next one", async () => {
   const bridge = fakeBridge({ history: [{ commits: commitsOf(30), defaultBranch: "main" }, { commits: commitsOf(2, 30), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   fireEvent.click(await screen.findByText("Load more"));
   await screen.findByText("msg 31");
   expect(screen.getByText("msg 0")).toBeTruthy();
   expect(screen.queryByText("Load more")).toBeNull();
-  expect(bridge.commands).toEqual([{ cmd: "history", page: 1 }, { cmd: "history", page: 2 }]);
+  expect(bridge.commands.filter((c) => c.cmd === "history")).toEqual([{ cmd: "history", page: 1 }, { cmd: "history", page: 2 }]);
 });
 
 test("history without commits says so", async () => {
-  render(<HistoryTab bridge={fakeBridge({ history: [{ commits: [], defaultBranch: "main" }] })} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={fakeBridge({ history: [{ commits: [], defaultBranch: "main" }] })} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   await screen.findByText("No commits");
 });
 
 test("a failed history load shows the error and Retry loads again", async () => {
   const bridge = fakeBridge({ history: [new BridgeError({ code: "network", message: "x" }), { commits: commitsOf(1), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   fireEvent.click(within(await screen.findByRole("alert")).getByText("Retry"));
   await screen.findByText("msg 0");
 });

@@ -4,6 +4,7 @@ import { parseQlikUrl } from "../../qlik/location";
 import type { Command, CommandError, StatusView } from "../shared/commands";
 import type { AppStatus } from "../flows/status";
 import { BridgeError, type Bridge } from "./bridge";
+import { AddTagDialog } from "./AddTagDialog";
 import { ConnectDialog } from "./ConnectDialog";
 import { CreateBranchDialog, toCommandError } from "./CreateBranchDialog";
 import { ErrorMessage } from "./ErrorMessage";
@@ -11,6 +12,8 @@ import { Header, UnlinkDialog } from "./Header";
 import { HistoryTab } from "./HistoryTab";
 import { LocalChangesTab } from "./LocalChangesTab";
 import { SetupViews } from "./SetupViews";
+import { TagsTab } from "./TagsTab";
+import { UpdateDialog } from "./UpdateDialog";
 import { watchTabServer } from "./tab-server";
 
 type DialogKind = "connect" | "branch" | "unlink";
@@ -67,7 +70,9 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   const [running, setRunning] = useState(0);
   const [progress, setProgress] = useState("Ready");
   const [dialog, setDialog] = useState<DialogKind | null>(null);
-  const [tab, setTab] = useState<"changes" | "history">("changes");
+  const [tab, setTab] = useState<"changes" | "history" | "tags">("changes");
+  const [tagging, setTagging] = useState<string | null>(null); // the commit an "Add tag" dialog is open for
+  const [updating, setUpdating] = useState<{ sha: string; label: string } | null>(null); // target of an update from History or Tags
   const [reloadToken, setReloadToken] = useState(0); // a new value makes the open tab load its data again
   const alive = useRef(true);
   const inflight = useRef(0); // commands in flight; unlike `running` it is current before the next render
@@ -84,6 +89,8 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
       } catch (e) {
         if (e instanceof BridgeError && e.error.code === "app-changed" && alive.current) {
           setDialog(null);
+          setTagging(null);
+          setUpdating(null);
           await reload.current();
           if (alive.current) setError(e.error);
         }
@@ -134,6 +141,8 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
     if (current !== null && current.kind === next.kind && current.appId === next.appId) return;
     shown.current = next;
     setDialog(null);
+    setTagging(null);
+    setUpdating(null);
     void load();
   }), [bridge, load]);
 
@@ -156,9 +165,10 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   const status = app?.status ?? null;
   const known = status ? repoOf(status) : null;
   const unlinkRepo = known?.repo ?? (status?.state === "duplicated" ? status.source.repo : null);
+  const canUpdate = app !== null && status?.state === "linked" && app.app.canWrite && !app.app.published;
   const closeDialog = (): void => setDialog(null);
   const appId = app?.app.id ?? "";
-  const dialogProps = { run, appId, busy, isBusy: () => inflight.current > 0, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); void load(); } };
+  const dialogProps = { run, appId, busy, isBusy: () => inflight.current > 0, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); setTagging(null); setUpdating(null); void load(); } };
 
   let body: JSX.Element | null = null;
   if (view?.page === "hub") {
@@ -175,11 +185,15 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
           <div class="tabs" role="tablist">
             <button type="button" role="tab" aria-selected={tab === "changes"} onClick={() => setTab("changes")}>Local Changes</button>
             <button type="button" role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>History</button>
+            <button type="button" role="tab" aria-selected={tab === "tags"} onClick={() => setTab("tags")}>Tags</button>
           </div>
           {tab === "changes"
             ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} repo={status.link.repo} onSaved={() => void load(false)} reloadToken={reloadToken}
               update={app.app.canWrite && !app.app.published ? { repo: status.link.repo, branch: status.link.branch, headSha: status.headSha, behindBy: status.behindBy, onUpdated: () => void load() } : undefined} />
-            : <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken} />}
+            : tab === "history"
+              ? <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken}
+                canUpdate={canUpdate} onAddTag={setTagging} onUpdate={setUpdating} />
+              : <TagsTab bridge={bridge} repo={status.link.repo} canUpdate={canUpdate} onUpdate={setUpdating} reloadToken={reloadToken} />}
         </>
       );
     } else {
@@ -239,6 +253,12 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
       )}
       {dialog === "unlink" && unlinkRepo !== null && (
         <UnlinkDialog {...dialogProps} repo={unlinkRepo} />
+      )}
+      {tagging !== null && status?.state === "linked" && (
+        <AddTagDialog {...dialogProps} repo={status.link.repo} sha={tagging} onCancel={() => setTagging(null)} />
+      )}
+      {updating !== null && canUpdate && status?.state === "linked" && (
+        <UpdateDialog {...dialogProps} repo={status.link.repo} target={updating} parts={["script", "objects", "files"]} onCancel={() => setUpdating(null)} onUpdated={dialogProps.onDone} />
       )}
       <footer class="footer" aria-live="polite">{progress}</footer>
     </main>
