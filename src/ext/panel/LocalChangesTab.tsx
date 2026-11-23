@@ -61,7 +61,9 @@ interface TabProps {
   reloadToken?: number;
   repo?: string; // for the "details" links
   /** Updating from the repository: only for linked apps the user may write to. */
-  update?: { repo: string; branch: string; headSha: string; behindBy: number; onUpdated(): void };
+  update?: { repo: string; branch: string; headSha: string; behindBy: number; onUpdated(): void; interruptedUpdate: boolean };
+  /** The panel's command runner and busy tracking, so an update started here is counted like every other command. */
+  panel: { run<T>(command: Command): Promise<T>; isBusy(): boolean; busy: boolean };
 }
 
 export function LocalChangesTab(props: TabProps): JSX.Element {
@@ -131,10 +133,10 @@ export function LocalChangesTab(props: TabProps): JSX.Element {
   }
 
   const dialogProps = {
-    run: <T,>(command: Command): Promise<T> => bridge.send<T>(command),
+    run: props.panel.run,
     appId: props.appId,
-    busy: false,
-    isBusy: () => false,
+    busy: props.panel.busy,
+    isBusy: props.panel.isBusy,
     onOptions: () => bridge.openOptions(),
   };
 
@@ -326,7 +328,7 @@ export function LocalChangesTab(props: TabProps): JSX.Element {
         </div>
       )}
       {updating !== null && update && (
-        <UpdateDialog {...dialogProps} repo={update.repo} target={updating} parts={updating.parts} onCancel={() => setUpdating(null)} onDone={updated} onUpdated={updated} />
+        <UpdateDialog {...dialogProps} interruptedUpdate={update.interruptedUpdate} repo={update.repo} target={updating} parts={updating.parts} onCancel={() => setUpdating(null)} onDone={updated} onUpdated={updated} />
       )}
       {behind !== null && committing && updating === null && (
         <Dialog title="The branch has moved on">

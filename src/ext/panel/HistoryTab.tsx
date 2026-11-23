@@ -10,7 +10,7 @@ import { ErrorMessage } from "./ErrorMessage";
 const PAGE_SIZE = 30;
 
 export function HistoryTab(props: {
-  bridge: Bridge; repo: string; branch: string; defaultBranch: string; reloadToken?: number;
+  bridge: Bridge; repo: string; branch: string | null; defaultBranch: string | null; reloadToken?: number;
   canUpdate: boolean; onAddTag(sha: string): void; onUpdate(target: { sha: string; label: string }): void;
 }): JSX.Element {
   const { bridge, repo, branch, defaultBranch, reloadToken, canUpdate, onAddTag, onUpdate } = props;
@@ -79,7 +79,7 @@ export function HistoryTab(props: {
 
   return (
     <section class="history">
-      {branch !== defaultBranch && (
+      {branch !== null && defaultBranch !== null && branch !== defaultBranch && (
         <p><a href={pullRequestUrl(repo, defaultBranch, branch)} target="_blank" rel="noreferrer">Open pull request on GitHub</a></p>
       )}
       {error && <ErrorMessage error={error} onOptions={() => bridge.openOptions()} onRetry={() => { if (!pending.current) void load(failedPage.current); }} disabled={loading} />}

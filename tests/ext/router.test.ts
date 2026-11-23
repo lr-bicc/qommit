@@ -230,6 +230,25 @@ test("history lists the commits of the linked branch", async () => {
   expect(res.value.commits.map((c: any) => c.message)).toEqual(["Initial commit"]);
 });
 
+test("history lists the commits for a published app, too", async () => {
+  const { run } = setup({ linked: true, published: true });
+  expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("published");
+  const res = (await run({ cmd: "history", page: 1 })) as any;
+  expect(res.ok).toBe(true);
+  expect(res.value.defaultBranch).toBe("main");
+  expect(res.value.commits.map((c: any) => c.message)).toEqual(["Initial commit"]);
+});
+
+test("status still answers when the journal cannot be read", async () => {
+  const { run, journal } = setup({ linked: true });
+  journal.get = async () => { throw new Error("storage unavailable"); };
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const res = (await run({ cmd: "status" })) as any;
+  expect(res.ok).toBe(true);
+  expect(res.value.interruptedUpdate).toBeNull();
+  warn.mockRestore();
+});
+
 test("history needs a linked app", async () => {
   const { run } = setup();
   expect(await run({ cmd: "history", page: 1 })).toMatchObject({ ok: false, error: { code: "not-linked" } });

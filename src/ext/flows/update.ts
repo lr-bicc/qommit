@@ -17,7 +17,11 @@ export type UpdatePart = "script" | "objects" | "files";
 export const UPDATE_PARTS: UpdatePart[] = ["script", "objects", "files"];
 
 export interface UpdateInput { link: LinkData; target: string; parts: UpdatePart[] }
-export interface UpdatePreview { target: string; items: ActionItem[]; summary: PlanSummary; localChanges: number; onBranch: boolean }
+export interface UpdatePreview {
+  target: string; items: ActionItem[]; summary: PlanSummary; localChanges: number; onBranch: boolean;
+  /** Nothing to apply, but the update still moves the link to the target commit. */
+  advances: boolean;
+}
 
 type Progress = (done: number, total: number) => void;
 
@@ -36,7 +40,8 @@ export async function prepareUpdate(ports: FlowPorts, input: UpdateInput, onProg
   if (info.published) throw new FlowError("published", "Published apps cannot be updated");
   if (!info.canWrite) throw new FlowError("cannot-write", "You have no permission to change this app");
 
-  const local = await readLocal(ports, link.repo, onProgress);
+  // The app reads report their own progress (the router); `onProgress` only follows the repository load.
+  const local = await readLocal(ports, link.repo);
   const targetFiles = await loadTarget(ports.github, link.repo, target, local, onProgress);
   const baseTree = await ports.github.getTree(link.repo, link.syncedSha);
 
@@ -54,7 +59,8 @@ export async function prepareUpdate(ports: FlowPorts, input: UpdateInput, onProg
   const onBranch = await isAncestor(ports.github, link.repo, target, head);
 
   const items = actions.filter((a) => !(a.op === "upsert" && a.temporary)).map(describeAction);
-  return { info, local, baseTree, actions, preview: { target, items, summary: summarize(actions), localChanges, onBranch } };
+  const advances = actions.length === 0 && onBranch && target !== link.syncedSha;
+  return { info, local, baseTree, actions, preview: { target, items, summary: summarize(actions), localChanges, onBranch, advances } };
 }
 
 export async function previewUpdate(ports: FlowPorts, input: UpdateInput, onProgress?: Progress): Promise<UpdatePreview> {
@@ -129,6 +135,11 @@ export async function runUpdate(
     await ports.app.save();
     await journal.clear(prepared.info.id);
     applied = actions.length;
+  } else if (await journal.get(prepared.info.id)) {
+    // An earlier update applied everything but did not finish saving: nothing is left to plan, so finish it.
+    onProgress?.("Saving app…");
+    await ports.app.save();
+    await journal.clear(prepared.info.id);
   }
 
   if (preview.onBranch) await saveLink(ports, { ...link, syncedSha: target });

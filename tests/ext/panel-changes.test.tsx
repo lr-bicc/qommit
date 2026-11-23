@@ -48,6 +48,8 @@ async function openCommit(bridge: FakeBridge): Promise<void> {
 const linkedBridge = (answers: Partial<Record<Command["cmd"], unknown[]>>): FakeBridge =>
   fakeBridge({ status: [view(LINKED)], ...answers });
 
+const panelOf = (bridge: FakeBridge) => ({ run: <T,>(command: Command): Promise<T> => bridge.send<T>(command), isBusy: () => false, busy: false });
+
 test("saves the selected paths, shows Success and loads status and changes again", async () => {
   const bridge = linkedBridge({ localChanges: [changes(TWO, ["loadScript.qvs"]), changes([])], commit: [{ sha: "n".repeat(40) }] });
   const second = hold(bridge, "localChanges", 2);
@@ -291,7 +293,7 @@ test("collapsed groups still count towards the selection", async () => {
 
 test("a published app shows the list only", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO)] });
-  render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={true} onSaved={() => undefined} />);
+  render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={true} onSaved={() => undefined} />);
   await screen.findByText("Overview");
   expect(screen.queryByText("Save changes")).toBeNull();
 });
@@ -307,16 +309,16 @@ test("Refresh in the header loads the local changes again", async () => {
 
 test("a changed reload token loads the changes again", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])] });
-  const { rerender } = render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={0} />);
+  const { rerender } = render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={0} />);
   await screen.findByText("Overview");
-  rerender(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={1} />);
+  rerender(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={1} />);
   await screen.findByText("No local changes");
 });
 
 test("onSaved is called after a successful save", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])], commit: [{ sha: "n" }] });
   const onSaved = vi.fn();
-  render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={onSaved} />);
+  render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={onSaved} />);
   fireEvent.click(await screen.findByText("Save changes"));
   fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
   fireEvent.click(screen.getByText("Save"));

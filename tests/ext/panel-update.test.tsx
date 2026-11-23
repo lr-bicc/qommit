@@ -24,6 +24,7 @@ const preview = (over: Partial<UpdatePreview> = {}): UpdatePreview => ({
   summary: { create: 0, change: 1, delete: 0 },
   localChanges: 0,
   onBranch: true,
+  advances: false,
   ...over,
 });
 const linkedView = (over: { behindBy?: number; headSha?: string }): StatusView => view({ ...LINKED, ...over } as typeof LINKED);
@@ -99,6 +100,45 @@ test("without actions the dialog says so and only offers Close", async () => {
   expect(within(dlg()).queryByText("Update")).toBeNull();
   fireEvent.click(within(dlg()).getByText("Close"));
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+const NO_ITEMS = { items: [], summary: { create: 0, change: 0, delete: 0 } };
+
+test("an empty plan that advances the link offers Update and Cancel", async () => {
+  const bridge = linked({ updatePreview: [preview({ ...NO_ITEMS, advances: true })], update: [{ syncedSha: c2.sha, backupBranch: null, applied: 0 }] });
+  await openDialog(bridge);
+  expect(await screen.findByText("The app already matches this state.")).toBeTruthy();
+  expect(within(dlg()).queryByText("Close")).toBeNull();
+  expect(within(dlg()).getByText("Cancel")).toBeTruthy();
+  fireEvent.click(within(dlg()).getByText("Update"));
+  expect(await screen.findByText("Success")).toBeTruthy();
+  expect(bridge.commands.find((c) => c.cmd === "update")).toEqual({ cmd: "update", appId: APP_ID, target: c2.sha, parts: ["script", "objects", "files"] });
+});
+
+test("an empty plan with an interrupted update offers Update, too", async () => {
+  const entry = { appId: APP_ID, repo: "lr-bicc/sales", branch: "main", target: c2.sha, backupBranch: null, total: 2, startedAt: "2026-11-20T10:00:00.000Z" };
+  const status = { ...(linkedView({ behindBy: 2 }) as Extract<StatusView, { page: "app" }>), interruptedUpdate: entry };
+  const bridge = linked({ updatePreview: [preview(NO_ITEMS)], update: [{ syncedSha: c2.sha, backupBranch: null, applied: 0 }] }, status);
+  await openDialog(bridge);
+  expect(await screen.findByText("The app already matches this state.")).toBeTruthy();
+  expect(within(dlg()).getByText("Cancel")).toBeTruthy();
+  fireEvent.click(within(dlg()).getByText("Update"));
+  expect(await screen.findByText("Success")).toBeTruthy();
+});
+
+test("an update started from Local Changes locks the panel while it runs", async () => {
+  const bridge = linked({ updatePreview: [preview()], update: [{ syncedSha: c2.sha, backupBranch: null, applied: 1 }] });
+  const original = bridge.send.bind(bridge);
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  bridge.send = (async (command: Command) => { if (command.cmd === "update") await gate; return original(command); }) as FakeBridge["send"];
+  await openDialog(bridge);
+  await screen.findByText(PLAN);
+  fireEvent.click(within(dlg()).getByText("Update"));
+  await waitFor(() => expect((screen.getByLabelText("Refresh") as HTMLButtonElement).disabled).toBe(true));
+  release();
+  await screen.findByText("Success");
+  await waitFor(() => expect((screen.getByLabelText("Refresh") as HTMLButtonElement).disabled).toBe(false));
 });
 
 test("unticking App Objects sends only script and files", async () => {

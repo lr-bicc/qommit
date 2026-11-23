@@ -7,7 +7,7 @@ import { commitChanges } from "../flows/commit";
 import { openDiff, type DiffSource } from "../flows/diff";
 import { importApp } from "../flows/import";
 import { computeLocalChanges } from "../flows/local-changes";
-import { FlowError, type AppPort, type FlowPorts, type LinkCache, type ServerPort, type UpdateJournal } from "../flows/ports";
+import { FlowError, type AppPort, type FlowPorts, type JournalEntry, type LinkCache, type ServerPort, type UpdateJournal } from "../flows/ports";
 import { connectRepository, createBranchForCopy, createRepository, suggestBranchName, unlinkApp } from "../flows/setup";
 import { resolveStatus, type AppStatus, type CopySource } from "../flows/status";
 import { addTag } from "../flows/tags";
@@ -200,7 +200,12 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
       case "status": {
         const status = await freshStatus();
         const info = await app.info();
-        const interruptedUpdate = await deps.journal.get(info.id);
+        let interruptedUpdate: JournalEntry | null = null;
+        try {
+          interruptedUpdate = await deps.journal.get(info.id);
+        } catch (e) {
+          console.warn("[qommit] journal unreadable:", messageOf(e)); // the status is still useful without it
+        }
         return { page: "app", app: info, status, suggestedBranch: suggestBranchName(info.user), interruptedUpdate } satisfies StatusView;
       }
       case "localChanges": {
@@ -242,10 +247,15 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
         return result;
       }
       case "history": {
-        const { link } = await linkedStatus();
-        const repo = await deps.github.getRepo(link.repo);
-        if (!repo) throw new FlowError("repo-not-found", `Repository ${link.repo} was not found`);
-        const commits = await deps.github.listCommits(link.repo, link.branch, command.page);
+        const status = await currentStatus();
+        let name: string;
+        let branch: string | null;
+        if (status.state === "linked") ({ repo: name, branch } = { repo: status.link.repo, branch: status.link.branch });
+        else if (status.state === "published") ({ repo: name, branch } = { repo: status.repo, branch: status.branch });
+        else throw notLinked(command.cmd);
+        const repo = await deps.github.getRepo(name);
+        if (!repo) throw new FlowError("repo-not-found", `Repository ${name} was not found`);
+        const commits = await deps.github.listCommits(name, branch ?? repo.defaultBranch, command.page);
         return { commits, defaultBranch: repo.defaultBranch };
       }
       case "updatePreview": {

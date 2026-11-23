@@ -22,6 +22,7 @@ const preview: UpdatePreview = {
   summary: { create: 0, change: 1, delete: 0 },
   localChanges: 0,
   onBranch: true,
+  advances: false,
 };
 const noChanges = { repo: "lr-bicc/sales", baseSha: "abc", items: [], unmaintained: [] };
 const dlg = (): HTMLElement => screen.getByRole("dialog");
@@ -29,9 +30,7 @@ const row = (message: string): HTMLElement => screen.getByText(message).closest(
 const fail = (code: string, message: string): BridgeError => new BridgeError({ code, message });
 
 function publishedView(): StatusView {
-  const v = view(LINKED);
-  if (v.page !== "app") throw new Error("not an app view");
-  return { ...v, app: { ...v.app, published: true } };
+  return view({ state: "published", repo: "lr-bicc/sales", branch: "main", syncedSha: "abc" });
 }
 
 function linked(answers: Partial<Record<Command["cmd"], unknown[]>> = {}, status: StatusView = view(LINKED)): FakeBridge {
@@ -170,4 +169,21 @@ test("a published app has no update actions", async () => {
   await screen.findByText("v1.0");
   expect(within(row("v1.0")).getByText("Diff to app")).toBeTruthy();
   expect(screen.queryByText("Update app to this tag")).toBeNull();
+});
+
+test("a published app can add a tag from the History tab", async () => {
+  const bridge = linked({}, publishedView());
+  await openTab(bridge, "History");
+  await screen.findByText("Second");
+  fireEvent.click(within(row("Second")).getByText("Add tag"));
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+});
+
+test("a published app without a recorded commit still shows History and Tags", async () => {
+  const bridge = linked({}, view({ state: "published", repo: "lr-bicc/sales", branch: null, syncedSha: null }));
+  render(<App bridge={bridge} />);
+  await screen.findByText("Second");
+  expect(screen.queryByRole("tab", { name: "Local Changes" })).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Tags" }));
+  await screen.findByText("v1.0");
 });

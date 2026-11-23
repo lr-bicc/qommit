@@ -169,6 +169,7 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   const canUpdate = app !== null && status?.state === "linked" && app.app.canWrite && !app.app.published;
   const closeDialog = (): void => setDialog(null);
   const appId = app?.app.id ?? "";
+  const panel = { run, isBusy: () => inflight.current > 0, busy };
   const dialogProps = { run, appId, busy, isBusy: () => inflight.current > 0, onOptions: () => bridge.openOptions(), onCancel: closeDialog, onDone: () => { setDialog(null); setTagging(null); setUpdating(null); void load(); } };
 
   let body: JSX.Element | null = null;
@@ -191,8 +192,8 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
             <button type="button" role="tab" aria-selected={tab === "import"} onClick={() => setTab("import")}>Import</button>
           </div>
           {tab === "changes"
-            ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} repo={status.link.repo} onSaved={() => void load(false)} reloadToken={reloadToken}
-              update={app.app.canWrite && !app.app.published ? { repo: status.link.repo, branch: status.link.branch, headSha: status.headSha, behindBy: status.behindBy, onUpdated: () => void load() } : undefined} />
+            ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={false} repo={status.link.repo} onSaved={() => void load(false)} reloadToken={reloadToken} panel={panel}
+              update={app.app.canWrite && !app.app.published ? { repo: status.link.repo, branch: status.link.branch, headSha: status.headSha, behindBy: status.behindBy, onUpdated: () => void load(), interruptedUpdate: app.interruptedUpdate !== null } : undefined} />
             : tab === "history"
               ? <HistoryTab bridge={bridge} repo={status.link.repo} branch={status.link.branch} defaultBranch={status.defaultBranch} reloadToken={reloadToken}
                 canUpdate={canUpdate} onAddTag={setTagging} onUpdate={setUpdating} />
@@ -202,6 +203,10 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
         </>
       );
     } else {
+      const published = status.state === "published" ? status : null;
+      const hasBase = published !== null && published.syncedSha !== null && published.syncedSha !== "";
+      const publishedTabs = hasBase ? (["changes", "history", "tags"] as const) : (["history", "tags"] as const);
+      const active = (publishedTabs as readonly string[]).includes(tab) ? tab : publishedTabs[0];
       body = (
         <>
           <SetupViews
@@ -214,8 +219,20 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
             onCreateBranch={() => setDialog("branch")}
             onUnlink={() => setDialog("unlink")}
           />
-          {status.state === "published" && status.syncedSha !== null && status.syncedSha !== "" && (
-            <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={true} repo={status.repo} onSaved={() => void load(false)} reloadToken={reloadToken} />
+          {published !== null && (
+            <>
+              <div class="tabs" role="tablist">
+                {hasBase && <button type="button" role="tab" aria-selected={active === "changes"} onClick={() => setTab("changes")}>Local Changes</button>}
+                <button type="button" role="tab" aria-selected={active === "history"} onClick={() => setTab("history")}>History</button>
+                <button type="button" role="tab" aria-selected={active === "tags"} onClick={() => setTab("tags")}>Tags</button>
+              </div>
+              {active === "changes"
+                ? <LocalChangesTab key={appId} bridge={bridge} appId={appId} readOnly={true} repo={published.repo} onSaved={() => void load(false)} reloadToken={reloadToken} panel={panel} />
+                : active === "history"
+                  ? <HistoryTab bridge={bridge} repo={published.repo} branch={published.branch} defaultBranch={null} reloadToken={reloadToken}
+                    canUpdate={false} onAddTag={setTagging} onUpdate={setUpdating} />
+                  : <TagsTab bridge={bridge} repo={published.repo} canUpdate={false} onUpdate={setUpdating} reloadToken={reloadToken} />}
+            </>
           )}
         </>
       );
@@ -259,11 +276,11 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
       {dialog === "unlink" && unlinkRepo !== null && (
         <UnlinkDialog {...dialogProps} repo={unlinkRepo} />
       )}
-      {tagging !== null && status?.state === "linked" && (
-        <AddTagDialog {...dialogProps} repo={status.link.repo} sha={tagging} onCancel={() => setTagging(null)} />
+      {tagging !== null && (status?.state === "linked" || status?.state === "published") && (
+        <AddTagDialog {...dialogProps} repo={status.state === "linked" ? status.link.repo : status.repo} sha={tagging} onCancel={() => setTagging(null)} />
       )}
       {updating !== null && canUpdate && status?.state === "linked" && (
-        <UpdateDialog {...dialogProps} repo={status.link.repo} target={updating} parts={["script", "objects", "files"]} onCancel={() => setUpdating(null)} onUpdated={dialogProps.onDone} />
+        <UpdateDialog {...dialogProps} interruptedUpdate={app?.interruptedUpdate != null} repo={status.link.repo} target={updating} parts={["script", "objects", "files"]} onCancel={() => setUpdating(null)} onUpdated={dialogProps.onDone} />
       )}
       <footer class="footer" aria-live="polite">{progress}</footer>
     </main>

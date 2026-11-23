@@ -315,6 +315,47 @@ describe("runUpdate", () => {
     expect((await github.listBranches(REPO)).length).toBe(1);
   });
 
+  test("an empty plan with an interrupted journal entry saves the app and clears the journal, without a backup", async () => {
+    const { ports, app, github, input, base, link } = setup();
+    const journal = memoryJournal();
+    app.link = { ...link };
+    await journal.set({ appId: (await ports.app.info()).id, repo: REPO, branch: "main", target: base, backupBranch: null, total: 2, startedAt: "2026-01-01T00:00:00.000Z" });
+    const r = await runUpdate(ports, journal, input(base));
+    expect(app.saves).toBe(1);
+    expect(journal.entries.size).toBe(0);
+    expect(r).toEqual({ syncedSha: base, backupBranch: null, applied: 0 });
+    expect((await github.listBranches(REPO)).length).toBe(1);
+  });
+
+  test("an empty plan without a journal entry does not save", async () => {
+    const { ports, app, input, base } = setup();
+    await runUpdate(ports, memoryJournal(), input(base));
+    expect(app.saves).toBe(0);
+  });
+
+  test("the preview says an empty plan advances syncedSha only for a new commit on the branch", async () => {
+    const { ports, input, commit, base } = setup();
+    expect((await previewUpdate(ports, input(base))).advances).toBe(false);
+    const head = await commit([["README.md", "# changed\n"]]);
+    const moved = await previewUpdate(ports, input(head));
+    expect(moved.items).toEqual([]);
+    expect(moved.advances).toBe(true);
+  });
+
+  test("a plan with actions does not advance", async () => {
+    const { ports, app, input, base } = setup();
+    app.snapshot.sheets.push(extraSheet);
+    expect((await previewUpdate(ports, input(base))).advances).toBe(false);
+  });
+
+  test("the app is read without progress, so the footer only follows the repository files", async () => {
+    const { ports, app, input, base } = setup();
+    const read = vi.spyOn(app, "read");
+    await prepareUpdate(ports, input(base), () => {});
+    expect(read).toHaveBeenCalled();
+    for (const call of read.mock.calls) expect(call[0]?.onProgress).toBeUndefined();
+  });
+
   test("progress texts for an update with local changes", async () => {
     const { ports, app, journal, input, head } = await withHeadScript();
     app.snapshot.sheets.push(extraSheet);

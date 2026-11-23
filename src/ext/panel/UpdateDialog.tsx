@@ -31,7 +31,7 @@ function BackupLink(props: { repo: string; branch: string }): JSX.Element {
   return <p>Backup: <a href={`https://github.com/${props.repo}/tree/${props.branch}`} target="_blank" rel="noreferrer">{props.branch}</a></p>;
 }
 
-export function UpdateDialog(props: DialogProps & { repo: string; target: { sha: string; label: string }; parts: UpdatePart[]; onUpdated(): void }): JSX.Element {
+export function UpdateDialog(props: DialogProps & { repo: string; target: { sha: string; label: string }; parts: UpdatePart[]; onUpdated(): void; interruptedUpdate?: boolean }): JSX.Element {
   const { repo, target, parts } = props;
   const [preview, setPreview] = useState<UpdatePreview | null>(null);
   const [error, setError] = useState<CommandError | null>(null); // of the preview
@@ -40,6 +40,7 @@ export function UpdateDialog(props: DialogProps & { repo: string; target: { sha:
   const [failure, setFailure] = useState<CommandError | null>(null); // of the update
   const alive = useRef(true);
   const request = useRef(0);
+  const submitting = useRef(false); // current before the next render, unlike `working`
 
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -55,7 +56,8 @@ export function UpdateDialog(props: DialogProps & { repo: string; target: { sha:
   useEffect(loadPreview, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function submit(): Promise<void> {
-    if (props.isBusy() || working) return;
+    if (props.isBusy() || working || submitting.current) return;
+    submitting.current = true;
     setWorking(true);
     setFailure(null);
     try {
@@ -64,6 +66,7 @@ export function UpdateDialog(props: DialogProps & { repo: string; target: { sha:
     } catch (e) {
       if (alive.current) setFailure(toCommandError(e));
     } finally {
+      submitting.current = false;
       if (alive.current) setWorking(false);
     }
   }
@@ -115,11 +118,22 @@ export function UpdateDialog(props: DialogProps & { repo: string; target: { sha:
     );
   } else if (preview === null) {
     body = <p class="muted">Preparing…</p>;
-  } else if (preview.items.length === 0) {
+  } else if (preview.items.length === 0 && !preview.advances && props.interruptedUpdate !== true) {
     body = (
       <>
         <p>The app already matches this state.</p>
         <div class="buttons"><button type="button" class="primary" onClick={props.onCancel}>Close</button></div>
+      </>
+    );
+  } else if (preview.items.length === 0) {
+    // Nothing to apply, but the update still finishes an interrupted one or moves the link to this commit.
+    body = (
+      <>
+        <p>The app already matches this state.</p>
+        <div class="buttons">
+          <button type="button" class="primary" disabled={working || props.busy} onClick={() => void submit()}>Update</button>
+          <button type="button" disabled={working} onClick={props.onCancel}>Cancel</button>
+        </div>
       </>
     );
   } else {

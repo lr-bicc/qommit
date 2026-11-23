@@ -237,7 +237,7 @@ test("a published app is read only", async () => {
   const published = { state: "published", repo: "lr-bicc/sales", branch: "main", syncedSha: "abc" } as const;
   render(<App bridge={fakeBridge({ status: [view(published)] })} />);
   await screen.findByText("Published app – read only. Duplicate the app to make changes.");
-  expect(screen.queryByRole("tab")).toBeNull();
+  expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Local Changes", "History", "Tags"]);
   expect(screen.queryByTitle("Unlink repository")).toBeNull();
 });
 
