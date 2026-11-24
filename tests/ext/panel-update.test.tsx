@@ -308,6 +308,14 @@ test("the picker preselects the head, shows tags and filters by message and sha"
   expect(screen.getByText("First")).toBeTruthy();
 });
 
+test("each commit in the picker shows its short sha, so commits with equal messages stay apart", async () => {
+  const twin = { ...c1, message: c2.message };
+  render(<App bridge={linked({ commits: [[c2, twin]] }, linkedView({ behindBy: 0 }))} />);
+  await screen.findAllByText("Second");
+  const rows = Array.from(document.querySelectorAll(".picker-list li"));
+  expect(rows.map((r) => r.querySelector(".commit-sha")?.textContent)).toEqual([c2.sha.slice(0, 7), twin.sha.slice(0, 7)]);
+});
+
 test("choosing an older commit updates to that commit and drops the count", async () => {
   const bridge = linked({ updatePreview: [preview({ target: c1.sha })] });
   render(<App bridge={bridge} />);

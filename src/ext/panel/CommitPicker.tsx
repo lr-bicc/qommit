@@ -98,7 +98,7 @@ export function CommitPicker(props: Props): JSX.Element {
               <span>
                 <span class="commit-message">{c.message.split("\n")[0]}</span>{" "}
                 {tags.filter((t) => t.sha === c.sha).map((t) => <span class="tag" key={t.name}>{t.name}</span>)}
-                <span class="commit-meta muted"> {new Date(c.date).toLocaleString()}</span>
+                <span class="commit-meta muted"> <span class="commit-sha">{c.sha.slice(0, 7)}</span> {new Date(c.date).toLocaleString()}</span>
               </span>
             </label>
           </li>
