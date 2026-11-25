@@ -1,17 +1,24 @@
 import { replaceAppContentIds } from "../../core/app-content-ids";
 import type { TreeChange } from "../../core/diff";
-import type { FileMap } from "../../core/types";
+import { withoutSnapshotIdentity } from "../../core/embedded-snapshots";
+import type { FileMap, PropertyTree } from "../../core/types";
 import { MAX_BLOBS_PER_CALL } from "../../github/repo";
 import type { GitHubPort } from "../shared/github-port";
 
 const NEUTRAL_ID = "00000000-0000-4000-8000-000000000000";
 
-/** The content an app would write: app ids in appcontent urls aligned, gitoqlok's engine stamps in value colours dropped. */
+/**
+ * The content an app would write: app ids in appcontent urls aligned, gitoqlok's engine stamps in value colours dropped,
+ * embedded snapshots without their id and selections.
+ */
 export function comparable(text: string): string | null {
   try {
-    const value = JSON.parse(replaceAppContentIds(text, NEUTRAL_ID)) as Record<string, unknown>;
+    let value = JSON.parse(replaceAppContentIds(text, NEUTRAL_ID)) as Record<string, unknown>;
     const colorMap = value?._ColorMapModel;
     if (colorMap && typeof colorMap === "object") delete (colorMap as Record<string, unknown>).qMeta;
+    if (value && typeof value === "object" && "qProperty" in value && Array.isArray(value.qChildren)) {
+      value = withoutSnapshotIdentity(value as unknown as PropertyTree) as unknown as Record<string, unknown>;
+    }
     return JSON.stringify(value);
   } catch {
     return null;

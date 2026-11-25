@@ -1,4 +1,5 @@
 import type { Action } from "../core/update-planner";
+import { embeddedSnapshots, withoutSnapshotIdentity } from "../core/embedded-snapshots";
 import type { GenericProps, PropertyTree } from "../core/types";
 import type { EngineApi } from "./engine-types";
 import { ENGINE_TIMEOUT_MESSAGE, engineCall, withTimeout } from "./timeout";
@@ -18,6 +19,7 @@ export class ApplyError extends Error {
 const TREE_TIMEOUT_MS = 60_000;
 const SAVE_TIMEOUT_MS = 150_000;
 const COLOR_MAP_PREFIX = "ColorMapModel_";
+const SNAPSHOT_PREFIX = "qommit-snapshot-";
 
 const messageOf = (e: unknown): string =>
   e instanceof Error ? e.message
@@ -58,6 +60,32 @@ async function upsertDimension(doc: EngineApi, id: string, exists: boolean, payl
   else await destroyColorMap(doc, id);
 }
 
+/** Embeds a snapshot in an object: from a temporary snapshot bookmark with the snapshot's content, removed afterwards. */
+async function embedSnapshot(doc: EngineApi, objectId: string, properties: GenericProps): Promise<void> {
+  const qId = SNAPSHOT_PREFIX + crypto.randomUUID();
+  const qType = properties.qInfo?.qType || "embeddedsnapshot";
+  await engineCall(doc.createBookmark!({ ...properties, qInfo: { qId, qType } }));
+  try {
+    await engineCall((await engineCall(doc.getObject!(objectId))).embedSnapshotObject!(qId));
+  } finally {
+    await engineCall(doc.destroyBookmark!(qId));
+  }
+}
+
+/**
+ * setFullPropertyTree ignores `qEmbeddedSnapshotRef` and keeps the snapshots an object already holds. So every snapshot of
+ * the tree that the app does not hold with the same content is embedded here; the engine gives it a new id.
+ */
+async function embedSnapshots(doc: EngineApi, handle: EngineApi, tree: PropertyTree): Promise<void> {
+  const wanted = embeddedSnapshots(withoutSnapshotIdentity(tree));
+  if (wanted.length === 0) return;
+  const written = withoutSnapshotIdentity((await treeCall(handle.getFullPropertyTree!())) as PropertyTree);
+  const held = new Map(embeddedSnapshots(written).map((s) => [s.objectId, JSON.stringify(s.properties)]));
+  for (const s of wanted) {
+    if (held.get(s.objectId) !== JSON.stringify(s.properties)) await embedSnapshot(doc, s.objectId, s.properties);
+  }
+}
+
 async function upsert(doc: EngineApi, a: Extract<Action, { op: "upsert" }>): Promise<void> {
   const { group, id, exists } = a;
   switch (group) {
@@ -76,6 +104,7 @@ async function upsert(doc: EngineApi, a: Extract<Action, { op: "upsert" }>): Pro
         ? await engineCall(doc.getObject!(id))
         : await engineCall(doc.createObject!({ qInfo: tree.qProperty.qInfo }));
       await treeCall(handle.setFullPropertyTree!(tree));
+      await embedSnapshots(doc, handle, tree);
     }
   }
 }

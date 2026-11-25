@@ -5,6 +5,8 @@ import type { Action } from "../../src/core/update-planner";
 import type { GenericProps, PropertyTree } from "../../src/core/types";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
 import { appFromSnapshot, fakeDoc } from "./fake-engine";
+import { withoutSnapshotIdentity } from "../../src/core/embedded-snapshots";
+import { SNAPSHOT_CONTENT, storyWithSnapshot } from "../fixtures/story-snapshot";
 
 const varProps = (id: string, name: string): GenericProps => ({ qInfo: { qId: id, qType: "variable" }, qName: name, qDefinition: "1" });
 const sheetTree = (id: string): PropertyTree => ({ qProperty: { qInfo: { qId: id, qType: "sheet" }, qMetaDef: { title: "T" } }, qChildren: [] });
@@ -149,4 +151,68 @@ test("saveApp calls DoSave", async () => {
   await saveApp(doc);
   expect(calls).toContain("doSave -");
   expect(app.saved).toBe(1);
+});
+
+describe("embedded snapshots", () => {
+  // The engine ignores qEmbeddedSnapshotRef in setFullPropertyTree; the writer embeds each snapshot from a temporary bookmark.
+  const storyAction = (tree: PropertyTree, exists: boolean): Action => ({ op: "upsert", group: "stories", id: "story-1", exists, payload: withoutSnapshotIdentity(tree) });
+  const stories = async (app: ReturnType<typeof appFromSnapshot>) => (await readApp(fakeDoc(app).doc, APP_ID, { published: false })).stories;
+  const bookmarkIds = (app: ReturnType<typeof appFromSnapshot>) => app.bookmarks.map((b) => b.props.qInfo.qId);
+
+  test("a new story gets its snapshot; the temporary bookmark is gone afterwards", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    const before = bookmarkIds(app);
+    const { doc, calls } = fakeDoc(app);
+    await applyActions(doc, [storyAction(storyWithSnapshot(), false)], { files: memoryStore().store });
+    expect(await stories(app)).toEqual([withoutSnapshotIdentity(storyWithSnapshot())]);
+    expect(bookmarkIds(app)).toEqual(before);
+    const temp = calls.find((c) => c.startsWith("createBookmark "))!.slice("createBookmark ".length);
+    expect(temp).toMatch(/^qommit-snapshot-/);
+    expect(calls.slice(calls.indexOf(`createBookmark ${temp}`))).toEqual([
+      `createBookmark ${temp}`, "getObject item-snap", "embedSnapshotObject item-snap", `destroyBookmark ${temp}`,
+    ]);
+  });
+
+  test("the temporary bookmark carries the snapshot's content", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    const { doc } = fakeDoc(app);
+    const created: GenericProps[] = [];
+    const createBookmark = doc.createBookmark!;
+    doc.createBookmark = (p: GenericProps) => { created.push(structuredClone(p)); return createBookmark(p); };
+    await applyActions(doc, [storyAction(storyWithSnapshot(), false)], { files: memoryStore().store });
+    expect(created).toEqual([{ qInfo: { qId: expect.stringMatching(/^qommit-snapshot-/), qType: "embeddedsnapshot" }, ...SNAPSHOT_CONTENT }]);
+  });
+
+  test("a story whose snapshot the app already holds is written without embedding again", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    await applyActions(fakeDoc(app).doc, [storyAction(storyWithSnapshot(), false)], { files: memoryStore().store });
+    const { doc, calls } = fakeDoc(app);
+    const retitled = storyWithSnapshot("other-id");
+    retitled.qProperty.qMetaDef = { title: "New title" };
+    await applyActions(doc, [storyAction(retitled, true)], { files: memoryStore().store });
+    expect(calls.filter((c) => /Bookmark|embed/.test(c))).toEqual([]);
+    expect((await stories(app))[0]).toEqual(withoutSnapshotIdentity(retitled));
+  });
+
+  test("a changed snapshot is embedded anew", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    await applyActions(fakeDoc(app).doc, [storyAction(storyWithSnapshot(), false)], { files: memoryStore().store });
+    const changed = storyWithSnapshot();
+    const ref = (changed.qChildren[0]!.qChildren[1] as PropertyTree & { qEmbeddedSnapshotRef: { qProperties: GenericProps } }).qEmbeddedSnapshotRef;
+    ref.qProperties = { ...ref.qProperties, title: "Changed" };
+    const { doc, calls } = fakeDoc(app);
+    await applyActions(doc, [storyAction(changed, true)], { files: memoryStore().store });
+    expect(calls.filter((c) => c.startsWith("embedSnapshotObject"))).toEqual(["embedSnapshotObject item-snap"]);
+    expect((await stories(app))[0]).toEqual(withoutSnapshotIdentity(changed));
+  });
+
+  test("a failed embedding still removes the temporary bookmark and fails the action", async () => {
+    const app = appFromSnapshot(makeSnapshot());
+    const before = bookmarkIds(app);
+    const { doc, failOn } = fakeDoc(app);
+    failOn("embedSnapshotObject", "item-snap");
+    const action = storyAction(storyWithSnapshot(), false);
+    await expect(applyActions(doc, [action], { files: memoryStore().store })).rejects.toMatchObject({ name: "ApplyError", failed: action });
+    expect(bookmarkIds(app)).toEqual(before);
+  });
 });

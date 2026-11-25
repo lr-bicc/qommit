@@ -3,6 +3,8 @@ import { FlowError } from "../../src/ext/flows/ports";
 import { CANON_ID, makeSnapshot } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
 import { gitoqlokFormat, legacyRepo, withValueColours } from "./helpers";
+import { withoutSnapshotIdentity } from "../../src/core/embedded-snapshots";
+import { storyWithSnapshot } from "../fixtures/story-snapshot";
 
 test("first contact with a gitoqlok repository", async () => {
   const { ports, github, app } = fakePorts();
@@ -126,4 +128,19 @@ test("repository blobs are downloaded once per content, not on every comparison"
   expect(first).toBeGreaterThan(before);
   await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
   expect(github.blobReads()).toBe(first);
+});
+
+test("an embedded snapshot under another id and with other selections is no local change; a missing one is", async () => {
+  const { ports, github, app } = fakePorts();
+  const snap = makeSnapshot();
+  snap.stories = [storyWithSnapshot()]; // as gitoqlok wrote it: with the snapshot's id and selections
+  const base = legacyRepo(github, snap);
+  app.snapshot.stories = [withoutSnapshotIdentity(storyWithSnapshot("embedded-anew", { qStateData: [] }))];
+  expect((await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base })).items).toEqual([]);
+
+  const withoutSnapshot = storyWithSnapshot();
+  delete (withoutSnapshot.qChildren[0]!.qChildren[1] as { qEmbeddedSnapshotRef?: unknown }).qEmbeddedSnapshotRef;
+  app.snapshot.stories = [withoutSnapshot];
+  const { items } = await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
+  expect(items.map((i) => [i.path, i.kind])).toEqual([["objects/stories/story-1.json", "changed"]]);
 });

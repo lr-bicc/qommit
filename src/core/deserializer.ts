@@ -1,6 +1,7 @@
 import type { AppSnapshot, FileContent, FileMap, GenericProps, PropertyTree } from "./types";
 import { filesToScript } from "./script-tabs";
 import { replaceAppContentIds } from "./app-content-ids";
+import { withoutSnapshotIdentity } from "./embedded-snapshots";
 
 function asText(content: FileContent): string {
   return typeof content === "string" ? content : new TextDecoder("utf-8").decode(content);
@@ -35,13 +36,13 @@ export function deserializeApp(files: FileMap, opts: { targetAppId: string }): A
   return {
     appId: opts.targetAppId,
     script: filesToScript(files),
-    appProps: appProps === undefined ? [] : parse<PropertyTree[]>(appProps),
+    appProps: appProps === undefined ? [] : parse<PropertyTree[]>(appProps).map(withoutSnapshotIdentity),
     variables: list<GenericProps>("variables"),
     dimensions: list<GenericProps>("dimensions").map(withoutColorMapStamp),
     measures: list<GenericProps>("measures"),
-    masterObjects: list<PropertyTree>("masterobjects"),
-    sheets: list<PropertyTree>("sheets"),
-    stories: list<PropertyTree>("stories"),
+    masterObjects: list<PropertyTree>("masterobjects").map(withoutSnapshotIdentity),
+    sheets: list<PropertyTree>("sheets").map(withoutSnapshotIdentity),
+    stories: list<PropertyTree>("stories").map(withoutSnapshotIdentity),
     bookmarks: list<GenericProps>("bookmarks"),
     staticFiles,
   };

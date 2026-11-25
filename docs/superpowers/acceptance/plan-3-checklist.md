@@ -26,7 +26,7 @@ Neu gegenüber Plan 2: **Update** (Stand aus GitHub in die App schreiben, mit Vo
 - [ ] **10.** „Update app to this tag“ wählen. Erwartet: Liegt das Tag auf dem Branch, ist `syncedSha` danach der Commit des Tags (Prüfung über die Engine); unterscheidet er sich vom Branch-HEAD nur in der README, rückt das Panel gleich auf den HEAD vor. Liegt das Tag nicht auf dem Branch, bleibt `syncedSha`, und der Stand erscheint als lokale Änderung.
 - [ ] **11.** „details“, „Diff to previous“ und „Diff to app“ wählen. Erwartet: Ein Overlay mit der Liste der Änderungen und der Gegenüberstellung; Skripte zeilenweise. „Close“ und die Escape-Taste schließen das Overlay.
 - [ ] **12.** Import von „Supply Chain Performance“ (`main`) im Hub. Erwartet: Eine neue App „Supply Chain Performance (main)“ ohne Daten. Sie mit „Connect to existing repository“ → „To existing branch“ `main` verbinden. Erwartet: „No local changes“ außer Bookmarks (Erfolgskriterium 4), auch wenn `main` noch im Format von gitoqlok vorliegt; „Save changes“ bietet dann nur „Remove files no longer maintained“ an. Danach „Unlink repository“ und die App löschen.
-- [ ] **13.** Story mit Snapshots (falls eine App mit Story vorliegt): importieren und mit der Quelle vergleichen. Erwartet: Die Story samt Snapshots stimmt überein (Spike-Frage 6).
+- [ ] **13.** Story mit Snapshots (falls eine App mit Story vorliegt): importieren und mit der Quelle vergleichen. Erwartet: Die Story zeigt dieselben Snapshots wie die Quelle, und das Panel meldet „No local changes“ (Spike-Frage 6). Eine Snapshot-ID und die Auswahl beim Aufnehmen weichen ab; das ist gewollt (Spec 4.4).
 
 ## 4. Veröffentlichte Apps und Ende zu Ende
 

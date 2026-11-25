@@ -1,3 +1,4 @@
+import { withoutSnapshotIdentity } from "../core/embedded-snapshots";
 import type { AppSnapshot, GenericProps, PropertyTree } from "../core/types";
 import type { ContentFiles } from "./content-files";
 import type { EngineApi, NxInfo } from "./engine-types";
@@ -159,7 +160,8 @@ export async function readApp(
   };
   const tree = (id: string) => async () => {
     const obj = (await call(doc.getObject(id))) as EngineApi;
-    return (await call(obj.getFullPropertyTree())) as PropertyTree;
+    // Embedding gives a snapshot a new id and today's selections, so neither is part of what is versioned.
+    return withoutSnapshotIdentity((await call(obj.getFullPropertyTree())) as PropertyTree);
   };
   const props = (open: (id: string) => Promise<EngineApi>) => async (id: string) =>
     call(((await call(open(id))) as EngineApi).getProperties() as Promise<GenericProps>);

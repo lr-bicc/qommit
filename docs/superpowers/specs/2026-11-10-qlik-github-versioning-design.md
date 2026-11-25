@@ -127,7 +127,7 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 - Datenverbindungen (Serverebene, enthalten Zugangsdaten)
 - Themes und Visualisierungs-Extensions; auf dem Zielserver müssen sie vorhanden sein
 - Private und Community-Objekte: In unveröffentlichten Apps werden alle Objekte versioniert, in veröffentlichten nur Sheets, Stories und Bookmarks mit `qMeta.approved = true` (Master Items sind dort immer freigegeben).
-- **Stories:** Sie werden versioniert und zurückgeschrieben. Ob Snapshots den Weg in eine App ohne Daten überstehen, ist ungeprüft, weil die Test-App keine Story hat (Spike-Frage 6); das wird in der Abnahme geprüft, sobald eine App mit Story vorliegt.
+- **Stories:** Sie werden versioniert und zurückgeschrieben. Ein Snapshot in einem Slide-Element steht im Baum als `qEmbeddedSnapshotRef` neben `qProperty`. `SetFullPropertyTree` übergeht ihn und lässt einen bereits eingebetteten Snapshot stehen (Abnahme von Plan 3, Spike-Frage 6). Deshalb bettet das Schreiben jeden Snapshot, den die App nicht mit demselben Inhalt hält, über ein vorübergehendes Snapshot-Bookmark ein (`CreateBookmark`, `EmbedSnapshotObject`, `DestroyBookmark`); das geht auch in einer App ohne Daten. Die Engine vergibt dabei eine neue ID und hängt die Auswahl der Sitzung statt der beim Aufnehmen an. Beides wird deshalb nicht versioniert: Die Dateien enthalten von einem Snapshot nur `qProperties` ohne `qInfo.qId`; Dateien von gitoqlok mit ID und `qBookmark` gelten als gleich. Den Inhalt eines Snapshots (Daten, Titel, Darstellung) gibt die App unverändert wieder.
 - **Bookmarks** werden gespeichert und im Diff angezeigt, aber nicht in eine App zurückgeschrieben. Die Engine legt ein Bookmark nur an, indem die Auswahl in einer App mit Daten nachgestellt wird; das würde die laufende Auswahl des Nutzers verändern und geht in einer App ohne Daten gar nicht.
 
 ### 4.5 Bewusste Abweichungen von gitoqlok
@@ -278,7 +278,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 
 ## 9. Spike vor der Umsetzung
 
-**Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft).
+**Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft). Frage 6 hat die Abnahme von Plan 3 beantwortet: nein, Snapshots gehen verloren; sie werden seitdem eigens eingebettet (Abschnitt 4.4).
 
 **Für Plan 3:** Beide offenen Punkte prüft die Abnahme von Plan 3 (`docs/superpowers/acceptance/plan-3-checklist.md`, Schritte 13 und 6): Import und Vergleich einer App mit Story (Frage 6), Skript nach „Load script“ und Daten nach `DoSave` (Frage 7, Skriptteil).
 
@@ -368,3 +368,4 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 6.6 | Die Commit-Auswahl zeigt je Commit die ersten sieben Zeichen des SHA. | gitoqlok-Repos enthalten viele Commits mit gleicher Nachricht („Zwischen-Commit.“, „Update branches table“); nur das Datum unterschied sie. |
 | 6.6 | JSON-Dateien werden in einer GraphQL-Abfrage je 100 Dateien geladen, die übrigen einzeln. | Der Vergleich mit gitoqloks Format lädt beim ersten Öffnen bis zu 357 Variablen-Dateien. |
 | 6.7 | Escape im Panel schließt das Diff-Overlay ebenso wie Escape in der Seite. | Das Overlay liegt in der Qlik-Seite, der Fokus bleibt nach dem Klick im Panel; Escape wirkte erst nach einem Klick ins Overlay. |
+| 4.4 | Snapshots in Stories werden nach `SetFullPropertyTree` eigens eingebettet (vorübergehendes Snapshot-Bookmark, `EmbedSnapshotObject`). Ihre ID und die Auswahl beim Aufnehmen (`qBookmark`) werden nicht versioniert und gelten nicht als Unterschied. | Abnahme Schritt 13 (Spike-Frage 6): Eine aus `bonus-scorecards` importierte App hatte keine Snapshots; alle vier Stories erschienen als geändert. Die Engine übergeht `qEmbeddedSnapshotRef` in `SetFullPropertyTree` und vergibt beim Einbetten stets eine neue ID. |

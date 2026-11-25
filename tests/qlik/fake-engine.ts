@@ -22,7 +22,9 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
  * without one. An unknown object rejects. `failOn(method, id)` makes that one call reject; `hangOn(method, id)`
  * makes it never settle. Like the engine, session objects created without `qInfo.qId` get an id assigned
  * (`<qType>#<n>`, returned as the handle's `id`); a session object whose qId already exists is refused. For
- * calls on a session object, `failOn`/`hangOn` also match its qType in place of the id.
+ * calls on a session object, `failOn`/`hangOn` also match its qType in place of the id. Like the engine, setFullPropertyTree
+ * ignores `qEmbeddedSnapshotRef` and keeps the snapshots already embedded in children of the same id; a child object
+ * (`getObject`) embeds a snapshot bookmark with embedSnapshotObject, under a new id and without the bookmark's selections.
  */
 export function fakeDoc(app: FakeApp): {
   doc: FakeDoc; calls: string[]; maxInFlight(): number; failOn(method: string, id: string): void; hangOn(method: string, id: string): void;
@@ -56,10 +58,34 @@ export function fakeDoc(app: FakeApp): {
   const unknown = (what: string, id: string) => ({ code: 2, message: `${what} not found: ${id}` });
   const idOf = (p: GenericProps) => p.qInfo.qId;
 
-  /** Properties holder of any object kind: generic objects, dimensions, measures, bookmarks, variables. */
-  function find(id: string): { get(): GenericProps; set(p: GenericProps): void; children(): PropertyTree[] } | undefined {
+  type Node = PropertyTree & { qEmbeddedSnapshotRef?: unknown };
+  function findNode(trees: PropertyTree[], id: string): Node | undefined {
+    for (const t of trees) {
+      if (idOf(t.qProperty) === id) return t;
+      const inner = findNode(t.qChildren, id);
+      if (inner) return inner;
+    }
+    return undefined;
+  }
+  /** The new children of a tree as the engine keeps them: refs in the input ignored, embedded snapshots of the old children kept. */
+  function keptChildren(old: PropertyTree[], next: PropertyTree[]): PropertyTree[] {
+    const strip = (t: Node): PropertyTree => {
+      const { qEmbeddedSnapshotRef: _ignored, ...rest } = t;
+      const held = findNode(old, idOf(t.qProperty))?.qEmbeddedSnapshotRef;
+      const children = t.qChildren.map((c) => strip(c));
+      return (held === undefined ? { ...rest, qChildren: children } : { ...rest, qChildren: children, qEmbeddedSnapshotRef: held }) as PropertyTree;
+    };
+    return clone(next).map((t) => strip(t));
+  }
+
+  /** Properties holder of any object kind: generic objects and their children, dimensions, measures, bookmarks, variables. */
+  function find(id: string): { get(): GenericProps; set(p: GenericProps): void; children(): PropertyTree[]; node?: Node } | undefined {
     const o = app.objects.find((x) => idOf(x.props) === id);
     if (o) return { get: () => o.props, set: (p) => { o.props = p; }, children: () => o.children ?? [] };
+    for (const top of app.objects) {
+      const node = findNode(top.children ?? [], id);
+      if (node) return { get: () => node.qProperty, set: (p) => { node.qProperty = p; }, children: () => node.qChildren, node };
+    }
     for (const list of [app.dimensions, app.measures]) {
       const i = list.findIndex((p) => idOf(p) === id);
       if (i >= 0) return { get: () => list[i]!, set: (p) => { list[i] = p; }, children: () => [] };
@@ -71,7 +97,7 @@ export function fakeDoc(app: FakeApp): {
     return undefined;
   }
 
-  function handle(id: string, h: { get(): GenericProps; set(p: GenericProps): void; children(): PropertyTree[] }): EngineApi {
+  function handle(id: string, h: { get(): GenericProps; set(p: GenericProps): void; children(): PropertyTree[]; node?: Node }): EngineApi {
     return {
       getProperties: () => call("getProperties", id, () => clone(h.get())),
       getFullPropertyTree: () => call("getFullPropertyTree", id, () => clone({ qProperty: h.get(), qChildren: h.children() })),
@@ -79,7 +105,16 @@ export function fakeDoc(app: FakeApp): {
       setFullPropertyTree: (tree: PropertyTree) => call("setFullPropertyTree", id, () => {
         h.set(clone(tree.qProperty));
         const o = app.objects.find((x) => idOf(x.props) === id);
-        if (o) o.children = clone(tree.qChildren);
+        if (o) o.children = keptChildren(o.children ?? [], tree.qChildren);
+      }),
+      embedSnapshotObject: (bookmarkId: string) => call("embedSnapshotObject", id, () => {
+        const b = app.bookmarks.find((x) => idOf(x.props) === bookmarkId);
+        if (!b) throw unknown("bookmark", bookmarkId);
+        if (!h.node) throw { code: 1, message: "the fake embeds snapshots in child objects only" };
+        h.node.qEmbeddedSnapshotRef = {
+          qProperties: { ...clone(b.props), qInfo: { qId: `snapshot#${++assigned}`, qType: b.props.qInfo.qType } },
+          qBookmark: { qStateData: [] },
+        };
       }),
     };
   }
@@ -204,6 +239,12 @@ export function fakeDoc(app: FakeApp): {
     createMeasure: (props: GenericProps) => creator("createMeasure", app.measures, props),
     destroyMeasure: (id: string) => remover("destroyMeasure", "measure", id, () => app.measures, (i) => app.measures.splice(i, 1)),
     setScript: (script: string) => call("setScript", undefined, () => { app.script = script; }),
+    createBookmark: (props: GenericProps) => call("createBookmark", idOf(props), () => {
+      if (find(idOf(props))) throw { code: 11, message: `object already exists: ${idOf(props)}` };
+      app.bookmarks.push({ props: clone(props) });
+      return handle(idOf(props), find(idOf(props))!);
+    }),
+    destroyBookmark: (id: string) => remover("destroyBookmark", "bookmark", id, () => app.bookmarks.map((b) => b.props), (i) => app.bookmarks.splice(i, 1)),
     doSave: () => call("doSave", undefined, () => { app.saved = (app.saved ?? 0) + 1; }),
   };
 
