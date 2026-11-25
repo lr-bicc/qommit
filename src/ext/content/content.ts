@@ -6,7 +6,7 @@ import type { LinkCache } from "../flows/ports";
 import type { Command, ProgressEvent } from "../shared/commands";
 import { createGitHubPort, type GatewayRequest, type GatewayResponse } from "../shared/github-port";
 import { loadOptions } from "../shared/options";
-import { showDiffOverlay } from "./overlay/show";
+import { closeDiffOverlay, showDiffOverlay } from "./overlay/show";
 import { createJournal } from "./journal";
 import { createRouter } from "./router";
 import { createServerPort } from "./server-port";
@@ -63,6 +63,7 @@ function start(): void {
       fetch: (input, init) => fetch(input, init),
     }),
     showDiff: showDiffOverlay,
+    closeDiff: closeDiffOverlay,
     emit: (event: ProgressEvent) => {
       // rejects when no panel is open
       chrome.runtime.sendMessage({ target: "panel", event }).catch(() => {});

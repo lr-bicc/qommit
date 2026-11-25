@@ -259,6 +259,7 @@ async function createWorld() {
     journal: memoryJournal(),
     server: () => server,
     showDiff: () => {},
+    closeDiff: () => false,
   });
   const run = async (command: Command): Promise<CommandResult> => {
     const result = await router(command);

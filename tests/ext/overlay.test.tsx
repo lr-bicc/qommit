@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { waitFor } from "@testing-library/preact";
 import type { FileContent } from "../../src/core/types";
-import { showDiffOverlay } from "../../src/ext/content/overlay/show";
+import { closeDiffOverlay, showDiffOverlay } from "../../src/ext/content/overlay/show";
 import type { DiffEntry, DiffSource } from "../../src/ext/flows/diff";
 import { FlowError } from "../../src/ext/flows/ports";
 
@@ -89,6 +89,14 @@ test("Close and Escape remove the overlay", () => {
   showDiffOverlay(sourceOf(FILES), { title: "t" });
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   expect(host()).toBeNull();
+});
+
+test("closeDiffOverlay closes the open overlay and says whether there was one", () => {
+  expect(closeDiffOverlay()).toBe(false);
+  showDiffOverlay(sourceOf(FILES), { title: "t" });
+  expect(closeDiffOverlay()).toBe(true);
+  expect(host()).toBeNull();
+  expect(closeDiffOverlay()).toBe(false);
 });
 
 test("the Escape listener is removed when the overlay closes", () => {

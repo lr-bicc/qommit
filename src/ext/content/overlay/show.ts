@@ -4,6 +4,13 @@ import { DiffOverlay } from "./DiffOverlay";
 
 let closeCurrent: (() => void) | null = null;
 
+/** Closes the open overlay, as "Close" does; true when one was open. */
+export function closeDiffOverlay(): boolean {
+  if (closeCurrent === null) return false;
+  closeCurrent();
+  return true;
+}
+
 /** Shows the differences full screen over the Qlik page; a second call replaces the overlay that is open. */
 export function showDiffOverlay(source: DiffSource, opts: { select?: string; title: string }): void {
   closeCurrent?.();

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { PanelRoot } from "../../src/ext/panel/App";
 import { installFakeChrome, type FakeChrome } from "./fake-chrome";
 import { fakeBridge } from "./fake-bridge";
@@ -45,4 +45,15 @@ test("without a tab, or when the tab cannot be read, the panel shows the hint", 
   cleanup();
   render(<PanelRoot tabId={9} createBridge={() => fakeBridge({})} />); // tab 9 does not exist
   await waitFor(() => expect(screen.getByText(HINT)).toBeTruthy());
+});
+
+test("Escape in the panel closes the diff overlay in the page, which never gets the key while the panel has the focus", async () => {
+  chrome.tabs = [{ id: 5, url: "https://qlik.example.com/hub" }];
+  const bridge = fakeBridge({ status: [{ page: "hub" }] });
+  render(<PanelRoot tabId={5} createBridge={() => bridge} />);
+  await screen.findByText("Open an app to use Qommit.");
+  fireEvent.keyDown(document, { key: "Enter" });
+  expect(bridge.commands.some((c) => c.cmd === "closeDiff")).toBe(false);
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(bridge.commands.filter((c) => c.cmd === "closeDiff")).toHaveLength(1);
 });

@@ -38,6 +38,7 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
   const server = fakeServer();
   const serverLocs: unknown[] = [];
   const diffs: { source: DiffSource; opts: { select?: string; title: string } }[] = [];
+  const closes: number[] = [];
   let clock = 0;
   const router = createRouter({
     currentUrl: () => url,
@@ -72,9 +73,10 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
     journal,
     server: (loc) => { serverLocs.push(loc); return server; },
     showDiff: (source, opts) => { diffs.push({ source, opts }); },
+    closeDiff: () => { closes.push(diffs.length); return diffs.length > 0; },
   });
   return {
-    run: router, sessions, events, github, cache, app, journal, server, serverLocs, diffs,
+    run: router, sessions, events, github, cache, app, journal, server, serverLocs, diffs, closes,
     setUrl: (u: string) => { url = u; },
     failNextRead: () => { sessions.failNext = true; },
   };
@@ -534,6 +536,13 @@ test("showDiff between commits works on the hub; the overlay gets the source, th
   expect(diffs[0]!.opts).toEqual({ select: DIM_PATH, title: "Diff" });
   expect(diffs[0]!.source.repo).toBe(REPO);
   expect(diffs[0]!.source.entries.map((e) => e.path)).toEqual([DIM_PATH]);
+  expect(sessions.opened).toBe(0);
+});
+
+test("closeDiff closes the overlay on any page without opening an engine session", async () => {
+  const { run, closes, sessions } = setup({ url: "https://qlik.example.com/qs/hub", linked: true });
+  expect(await run({ cmd: "closeDiff" })).toEqual({ ok: true, value: false });
+  expect(closes).toEqual([0]);
   expect(sessions.opened).toBe(0);
 });
 

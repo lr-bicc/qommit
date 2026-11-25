@@ -101,6 +101,14 @@ function Panel({ bridge: tabBridge }: { bridge: Bridge }): JSX.Element {
   }), [tabBridge]);
 
   useEffect(() => bridge.onProgress(setProgress), [bridge]);
+  // The overlay lives in the page, which gets no keys while the panel has the focus: Escape here closes it, too.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") void tabBridge.send({ cmd: "closeDiff" }).catch(() => undefined);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tabBridge]);
   useEffect(() => () => { alive.current = false; }, []);
 
   /** Sends a command; the buttons stay locked until it is answered. Rejects with BridgeError. */

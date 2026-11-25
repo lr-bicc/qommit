@@ -23,6 +23,7 @@ export type Command =
   | { cmd: "updatePreview"; appId: string; target: string; parts: UpdatePart[] }
   | { cmd: "update"; appId: string; target: string; parts: UpdatePart[] }
   | { cmd: "showDiff"; repo: string; before: DiffSide; after: DiffSide; select?: string; title: string }
+  | { cmd: "closeDiff" }
   | { cmd: "importApp"; repo: string; sha: string; label: string };
 
 /** Result types of the commands that answer with more than a status or null. */

@@ -30,6 +30,8 @@ export interface RouterDeps {
   server(loc: QlikLocation): ServerPort;
   /** Shows the differences in the page; the panel stays as it is. */
   showDiff(source: DiffSource, opts: { select?: string; title: string }): void;
+  /** Closes the overlay; true when one was open. */
+  closeDiff(): boolean;
 }
 
 const PROGRESS_INTERVAL_MS = 250;
@@ -151,6 +153,7 @@ export function createRouter(deps: RouterDeps): (command: Command) => Promise<Co
         const server = deps.server({ origin: loc.origin, prefix: loc.prefix, appId: null });
         return importApp({ github: deps.github, server }, command, (text) => emit({ event: "progress", text }));
       }
+      case "closeDiff": return deps.closeDiff();
       case "showDiff":
         if (command.before.kind === "commit" && command.after.kind === "commit") {
           const source = await openDiff(noAppPorts(deps, await deps.loadOptions()), command.repo, command.before, command.after);
