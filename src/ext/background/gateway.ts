@@ -1,11 +1,11 @@
 import { createGitHubClient } from "../../github/client";
 import { GitHubError } from "../../github/errors";
 import * as repoApi from "../../github/repo";
-import type { FileChange } from "../../github/repo";
+import type { BlobRef, FileChange } from "../../github/repo";
 import * as snapshotApi from "../../github/snapshot";
 import type { Options } from "../shared/options";
 import type { GatewayRequest, GatewayResponse, GitHubPort, WireError } from "../shared/github-port";
-import { fromWire, type WireContent } from "../shared/wire";
+import { fromWire, toWire, type WireContent } from "../shared/wire";
 
 export interface GatewayDeps {
   loadOptions(): Promise<Options>;
@@ -43,10 +43,28 @@ function parseCommitInput(v: unknown): { branch: string; parentSha: string; mess
   return { branch: v.branch, parentSha: v.parentSha, message: v.message, changes, ...(v.replaceRoot ? { replaceRoot: true } : {}) };
 }
 
+const isSha40 = (v: unknown): v is string => isString(v) && /^[0-9a-f]{40}$/i.test(v);
+
+function parseTagInput(v: unknown): { name: string; sha: string; message: string } | null {
+  if (!isObject(v) || !isString(v.name) || !isSha40(v.sha) || !isString(v.message)) return null;
+  if (!repoApi.isValidRefName(v.name)) return null;
+  return { name: v.name, sha: v.sha, message: v.message };
+}
+
+function parseBlobItems(v: unknown): BlobRef[] | null {
+  if (!Array.isArray(v) || v.length < 1 || v.length > repoApi.MAX_BLOBS_PER_CALL) return null;
+  const items: BlobRef[] = [];
+  for (const it of v) {
+    if (!isObject(it) || !isString(it.path) || !isValidCommitPath(it.path) || !isSha40(it.sha)) return null;
+    items.push({ path: it.path, sha: it.sha });
+  }
+  return items;
+}
+
 interface OpSpec {
   /** Number of leading string arguments (the first is a repo when `repo` is set). */
   strings: number;
-  tail?: "number" | "commit"; // one extra trailing argument: a page number, or commitFiles' input object
+  tail?: "number" | "commit" | "tag" | "blobs"; // one extra trailing argument: a page number, or the input object / list of the call
   repo?: boolean;
   run: Call;
 }
@@ -78,6 +96,18 @@ const OPS: Record<keyof GitHubPort, OpSpec> = {
   },
   listCommits: { strings: 2, tail: "number", repo: true, run: (c, _o, [r, b, page]) => repoApi.listCommits(c, r as string, b as string, page as number) },
   compare: { strings: 3, repo: true, run: (c, _o, [r, base, head]) => repoApi.compare(c, r as string, base as string, head as string) },
+  listTags: { strings: 1, repo: true, run: (c, _o, [r]) => repoApi.listTags(c, r as string) },
+  createTag: {
+    strings: 1, tail: "tag", repo: true,
+    run: async (c, _o, [r, input]) => {
+      await repoApi.createTag(c, r as string, input as NonNullable<ReturnType<typeof parseTagInput>>);
+      return null;
+    },
+  },
+  readBlobs: {
+    strings: 1, tail: "blobs", repo: true,
+    run: async (c, _o, [r, items]) => [...(await repoApi.readBlobs(c, r as string, items as BlobRef[]))].map(([p, content]) => [p, toWire(content)]),
+  },
 };
 
 type ArgKind = "sha" | "ref" | "path" | "name";
@@ -161,6 +191,16 @@ export async function handleGateway(request: GatewayRequest, deps: GatewayDeps):
       const input = parseCommitInput(args[spec.strings]);
       if (input === null) return notAllowed("Malformed commit input");
       args[spec.strings] = input;
+    }
+    if (spec.tail === "tag") {
+      const input = parseTagInput(args[spec.strings]);
+      if (input === null) return notAllowed("Malformed tag input");
+      args[spec.strings] = input;
+    }
+    if (spec.tail === "blobs") {
+      const items = parseBlobItems(args[spec.strings]);
+      if (items === null) return notAllowed("Malformed blob list");
+      args[spec.strings] = items;
     }
     if (spec.repo && !isRepoOf(args[0] as string, options.org)) return notAllowed("Repository is outside the configured organisation");
 

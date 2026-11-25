@@ -19,7 +19,7 @@ function setup(published = false) {
 test("info holds the app's title, state, url and the session user", async () => {
   const { port } = setup();
   expect(await port.info()).toEqual({
-    id: APP_ID, title: "Sales", published: false, url: `https://qlik.example.com/qs/sense/app/${APP_ID}`, user: "r.vasilev",
+    id: APP_ID, title: "Sales", published: false, url: `https://qlik.example.com/qs/sense/app/${APP_ID}`, user: "r.vasilev", canWrite: true,
   });
 });
 
@@ -52,4 +52,22 @@ test("the link and the gitoqlok metadata go through the app object", async () =>
   await port.removeLink();
   expect(await port.readLink()).toBeNull();
   expect(await port.readGitoqlokMeta()).toBeNull();
+});
+
+test("canWrite in the info follows the update permission", async () => {
+  const { port, fake } = setup();
+  fake.doc.getAppLayout = async () => ({ qTitle: "Sales", published: false, permissions: { update: false } });
+  expect((await port.info()).canWrite).toBe(false);
+});
+
+test("apply and save of the app port reach the engine", async () => {
+  const { port, fake, fetched } = setup();
+  const seen: [number, number][] = [];
+  await port.apply([{ op: "setScript", script: "LOAD 1;" }, { op: "putFile", name: "a.png", exists: false, bytes: new Uint8Array([1]) }], (d, t) => seen.push([d, t]));
+  await port.save();
+  expect(fake.calls.some((c) => c.startsWith("setScript"))).toBe(true);
+  expect(fake.calls.some((c) => c.startsWith("doSave"))).toBe(true);
+  expect(fetched).toHaveLength(1);
+  expect(fetched[0]).toMatch(/\/qs\/qrs\/appcontent\/.+\/uploadfile\?externalpath=a\.png&overwrite=true&xrfkey=/);
+  expect(seen[seen.length - 1]).toEqual([2, 2]);
 });

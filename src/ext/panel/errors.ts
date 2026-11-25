@@ -33,6 +33,16 @@ export function errorText(error: CommandError): ErrorText {
     case "nothing-to-commit": return { text: "Nothing to save." };
     case "message-required": return { text: "Enter a commit message." };
     case "published": return { text: "Published apps are read only. Duplicate the app to make changes." };
+    case "cannot-write": return { text: "You have no permission to change this app." };
+    case "tag-exists": return { text: "Tag already exists." };
+    case "invalid-tag-name": return { text: "Invalid tag name." };
+    case "import-failed": {
+      const appId = (error.detail as { appId?: unknown } | null | undefined)?.appId;
+      if (typeof appId === "string") return { text: "The import stopped. The new app was created but is incomplete." };
+      return { text: "The app could not be created.", detail: error.message };
+    }
+    case "invalid-target": return { text: "The selected state contains files that cannot be applied." };
+    case "update-failed": return { text: "The update stopped.", detail: error.message };
     default: return { text: error.message };
   }
 }

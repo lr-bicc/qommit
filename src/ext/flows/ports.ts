@@ -1,10 +1,11 @@
 import { groupOf } from "../../core/diff";
 import type { AppSnapshot } from "../../core/types";
+import type { Action } from "../../core/update-planner";
 import type { LinkData } from "../../qlik/link";
 import type { GitHubPort } from "../shared/github-port";
 import { GatewayError } from "../shared/github-port";
 
-export interface AppInfo { id: string; title: string; published: boolean; url: string; user: string }
+export interface AppInfo { id: string; title: string; published: boolean; url: string; user: string; canWrite: boolean }
 
 export interface AppPort {
   info(): Promise<AppInfo>;
@@ -12,7 +13,17 @@ export interface AppPort {
   readLink(): Promise<LinkData | null>;
   writeLink(link: LinkData): Promise<void>;
   removeLink(): Promise<void>;
+  /** Applies the actions in order; a failure rejects with ApplyError. Does not save the app. */
+  apply(actions: Action[], onProgress?: (done: number, total: number) => void): Promise<void>;
+  save(): Promise<void>;
   readGitoqlokMeta(): Promise<{ repo: string | null; lastCommitId: string | null } | null>;
+}
+
+/** Server-wide actions: creating a new app and opening it. */
+export interface ServerPort {
+  /** Rejects with an error carrying `appId` when the app was created but could not be opened. */
+  createApp(name: string): Promise<{ app: AppPort; close(): Promise<void> }>;
+  appUrl(appId: string): string;
 }
 
 export interface LinkCache {
@@ -24,11 +35,20 @@ export interface LinkCache {
   setUnlinked(key: string, value: boolean): Promise<void>;
 }
 
+/** Written before the app is changed and cleared after it was saved; a leftover entry marks an interrupted update. */
+export interface JournalEntry { appId: string; repo: string; branch: string; target: string; backupBranch: string | null; total: number; startedAt: string }
+export interface UpdateJournal {
+  get(appId: string): Promise<JournalEntry | null>;
+  set(entry: JournalEntry): Promise<void>;
+  clear(appId: string): Promise<void>;
+}
+
 export interface FlowPorts { app: AppPort; github: GitHubPort; cache: LinkCache; repoPrefix: string; now(): Date }
 
 export type FlowErrorCode =
   | "published" | "not-linked" | "branch-exists" | "branch-not-found" | "invalid-branch-name" | "repo-exists"
-  | "repo-not-found" | "nothing-to-commit" | "message-required";
+  | "repo-not-found" | "nothing-to-commit" | "message-required"
+  | "invalid-target" | "update-failed" | "cannot-write" | "tag-exists" | "invalid-tag-name" | "import-failed";
 
 export class FlowError extends Error {
   constructor(public code: FlowErrorCode, message: string, public detail?: unknown) {

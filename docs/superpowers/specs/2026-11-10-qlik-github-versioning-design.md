@@ -1,8 +1,8 @@
 # Design: Qommit – Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
 - **Name des Tools:** Qommit (Paket- und Repo-Name `qommit`, Repo `lr-bicc/qommit`)
-- **Datum:** 2026-11-16 (Revision 11)
-- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12), Revision 11 die Änderungen aus der Abnahme von Plan 2 (Abschnitt 13).
+- **Datum:** 2026-11-25 (Revision 13)
+- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12), Revision 11 die Änderungen aus der Abnahme von Plan 2 (Abschnitt 13), Revision 12 die Änderungen aus der Umsetzung von Plan 3 (Abschnitt 14), Revision 13 die Änderungen aus der Abnahme von Plan 3 (Abschnitt 15).
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
 - **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
 
@@ -127,7 +127,7 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 - Datenverbindungen (Serverebene, enthalten Zugangsdaten)
 - Themes und Visualisierungs-Extensions; auf dem Zielserver müssen sie vorhanden sein
 - Private und Community-Objekte: In unveröffentlichten Apps werden alle Objekte versioniert, in veröffentlichten nur Sheets, Stories und Bookmarks mit `qMeta.approved = true` (Master Items sind dort immer freigegeben).
-- **Stories:** Sie werden versioniert und zurückgeschrieben. Ob Snapshots den Weg in eine App ohne Daten überstehen, ist ungeprüft, weil die Test-App keine Story hat (Spike-Frage 6); das wird in der Abnahme geprüft, sobald eine App mit Story vorliegt.
+- **Stories:** Sie werden versioniert und zurückgeschrieben. Ein Snapshot in einem Slide-Element steht im Baum als `qEmbeddedSnapshotRef` neben `qProperty`. `SetFullPropertyTree` übergeht ihn und lässt einen bereits eingebetteten Snapshot stehen (Abnahme von Plan 3, Spike-Frage 6). Deshalb bettet das Schreiben jeden Snapshot, den die App nicht mit demselben Inhalt hält, über ein vorübergehendes Snapshot-Bookmark ein (`CreateBookmark`, `EmbedSnapshotObject`, `DestroyBookmark`); das geht auch in einer App ohne Daten. Die Engine vergibt dabei eine neue ID und hängt die Auswahl der Sitzung statt der beim Aufnehmen an. Beides wird deshalb nicht versioniert: Die Dateien enthalten von einem Snapshot nur `qProperties` ohne `qInfo.qId`; Dateien von gitoqlok mit ID und `qBookmark` gelten als gleich. Den Inhalt eines Snapshots (Daten, Titel, Darstellung) gibt die App unverändert wieder.
 - **Bookmarks** werden gespeichert und im Diff angezeigt, aber nicht in eine App zurückgeschrieben. Die Engine legt ein Bookmark nur an, indem die Auswahl in einer App mit Daten nachgestellt wird; das würde die laufende Auswahl des Nutzers verändern und geht in einer App ohne Daten gar nicht.
 
 ### 4.5 Bewusste Abweichungen von gitoqlok
@@ -140,7 +140,7 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 | `loadScript.qvs` (das zusammengefügte Gesamtskript) wird nicht geschrieben. | Jede Skriptänderung stünde sonst doppelt im Repo, und jeder Merge-Konflikt im Skript müsste zweimal gleich gelöst werden. gitoqlok bietet dasselbe als Einstellung an („Do not commit full loadScript.qvs file“). |
 | Commit-Nachrichten erhalten keinen Zusatz wie `[%_OBJECTS_%%_SCRIPT_%]`. | Der Zusatz ist für die Extension nicht nötig. |
 
-**Bestehende gitoqlok-Repos:** Der erste „Save changes“ mit der Extension entfernt einmalig die Dateien skripterzeugter Variablen, schreibt die normalisierten Datei-URLs und entfernt `qMeta` aus den Wertefarben. Für `supply-chain-performance` sind das 357 Variablen-Dateien, 11 Sheets und 2 Dimensionen (Spike). Liegen im Repo nicht mehr gepflegte Dateien (`loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json`, `builds/`), zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt); die Dateien bleiben in der Git-Historie erhalten.
+**Bestehende gitoqlok-Repos:** Das Format, in dem gitoqlok die Dateien geschrieben hat, gilt nicht als Unterschied zur App: Dateien skripterzeugter Variablen, eine andere App-ID in Datei-URLs und `qMeta` in den Wertefarben. Lokale Änderungen, „Diff to app“, die Vorschau eines Updates und Sicherungs-Branches zeigen deshalb nur echte Änderungen; zwischen zwei Commits bleibt das Format ein Unterschied. Eine Datei im alten Format wird erst neu geschrieben, wenn sich ihr Objekt ändert. Die Dateien skripterzeugter Variablen zählen wie `loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json` und `builds/` zu den nicht mehr gepflegten Dateien. Liegen solche im Repo, zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt), auch wenn es sonst keine lokalen Änderungen gibt; die Dateien bleiben in der Git-Historie erhalten. Für `supply-chain-performance` sind das 357 Variablen-Dateien und fünf weitere Dateien.
 
 ## 5. Verknüpfung App ↔ Repo ↔ Branch
 
@@ -165,7 +165,7 @@ Wie bei gitoqlok enthält `README.md` die Tabelle `Branch Name | Qlik applicatio
 ### Auflösung beim Öffnen einer App
 1. Link-Objekt mit passender `appId` → verknüpft.
 2. Link-Objekt mit fremder `appId` in einer unveröffentlichten App → Kopie einer versionierten App (Ablauf 6.3).
-3. Link-Objekt in einer veröffentlichten App → Nur-Lese-Ansicht: Repo, Branch und Commit, aus dem veröffentlicht wurde, sowie Abweichungen der App von diesem Commit. Änderungen sind hier nicht möglich; das Panel verweist auf das Duplizieren.
+3. Link-Objekt in einer veröffentlichten App → Nur-Lese-Ansicht: Repo, Branch und Commit, aus dem veröffentlicht wurde, sowie Abweichungen der App von diesem Commit. Änderungen sind hier nicht möglich; das Panel verweist auf das Duplizieren. Trägt das Link-Objekt eine fremde `appId`, stammt es aus der Kopie, die per „Publish and replace“ über die App gelegt wurde; Branch ist dann die Zeile der App in der Branch-Tabelle, sonst der Default-Branch, sobald dieser den aufgezeichneten Commit enthält; bis zum Merge bleibt es der Branch der Kopie. Unterscheidet sich der aufgezeichnete Commit vom HEAD dieses Branches nur in der README oder in nicht gepflegten Dateien (etwa beim Merge-Commit), gilt der HEAD.
 4. Kein Link-Objekt → lokaler Cache; sonst das Repo aus `_gitoqlikMetaData` der App; sonst eine GraphQL-Abfrage über die Repos der Org, die `README.md` des Default-Branches liest und die App-ID in der Branch-Tabelle sucht. Steht die App in der Branch-Tabelle des gefundenen Repos → Link-Objekt wird angelegt; `syncedSha` ist der letzte Commit aus den gitoqlok-Angaben, sofern er in der Historie des Branches liegt, sonst der Branch-HEAD. Enthält die App bereits den Stand des Branch-HEADs (siehe „Übernommener Commit“ unten), ist es der Branch-HEAD. Nennen die gitoqlok-Angaben ein Repo, in dessen Tabelle die App nicht steht → Kopie einer versionierten App (Ablauf 6.3, ohne bekannten Quell-Branch). So werden Apps erkannt, die bisher mit gitoqlok versioniert wurden.
 5. Kein Treffer → „No linked repository“ (Ablauf 6.2).
 
@@ -179,7 +179,7 @@ Verweist ein Link-Objekt auf einen Branch, den es auf GitHub nicht mehr gibt (na
 - **Local Changes:** Commit-Auswahl + **Update** (mit Zähler neuer Commits und Aufklappmenü für die Teile), **Save changes**, darunter die Gruppen *Added objects*, *Deleted objects*, *Changed objects*, jeweils unterteilt nach Sheets, Master Items, Variables, Script, Attached files, mit Objekttitel und Link „details“.
 - **Commit-Auswahl:** aufklappbare, durchsuchbare Liste der Commits des Branches, neuester zuerst, je Eintrag Nachricht, Datum und Uhrzeit sowie Tag-Badges. Vorausgewählt ist der Branch-HEAD.
 - **Fußzeile:** Status („Ready“, „Loading application data…“, Fortschritt).
-- Repo-Daten werden pro Branch zwischengespeichert; „Refresh“ lädt sie neu. Die lokalen Änderungen werden beim Öffnen des Panels, bei „Refresh“ und nach jedem Commit oder Update neu ermittelt; eine laufende Überwachung der App im Hintergrund wie bei gitoqlok gibt es in v1 nicht.
+- Repo-Daten werden pro Branch zwischengespeichert; „Refresh“ lädt sie neu. Die lokalen Änderungen werden beim Öffnen des Panels, bei „Refresh“, bei „Save changes“ und nach jedem Commit oder Update neu ermittelt; eine laufende Überwachung der App im Hintergrund wie bei gitoqlok gibt es in v1 nicht.
 
 ### 6.2 App ohne Repo
 Das Panel zeigt „No linked repository“ mit zwei Aktionen:
@@ -200,7 +200,7 @@ Create Branch:
 Das Content Script liest die App und serialisiert sie. Vom Commit `syncedSha` wird nur der Tree geladen (Pfad → Blob-SHA); `git-hash` berechnet die Blob-SHAs der lokalen Dateien, der Vergleich ergibt added/deleted/changed ohne Download. Inhalte werden erst für „details“ geladen. Der HEAD des Branches wird abgefragt; ist er neuer als `syncedSha`, zeigt der Kopf die Zahl der Commits dazwischen. Unterscheiden sich `syncedSha` und HEAD in keiner gepflegten Datei (etwa nur durch „Update branches table“ oder einen Merge ohne Änderung), gilt die App als aktuell: `syncedSha` wird stillschweigend auf den HEAD gesetzt. Dasselbe gilt vor einem Commit.
 
 ### 6.5 Save changes (Commit)
-1. „Save changes“ schaltet den Reiter in den Commit-Modus, wie bei gitoqlok:
+1. „Save changes“ liest die App neu und schaltet den Reiter dann in den Commit-Modus, wie bei gitoqlok; ergibt sich dabei nichts zu speichern, bleibt die Liste mit „No local changes“ stehen. Die Schaltfläche ist deshalb auch bei leerer Liste aktiv:
    - „Choose what to save“ mit den Teilen Load script, App Objects, Bookmarks, Attached files. Vorausgewählt sind alle Teile mit Änderungen.
    - Jede Gruppe und jedes einzelne Objekt in den Listen erhält ein Häkchen; so lässt sich genau wählen, was in den Commit kommt. Das Ladeskript wird nur als Ganzes gespeichert: Die Skript-Tabs und `tab_order.txt` werden gemeinsam an- und abgewählt, weil ein einzelner Tab ohne passende Reihenfolge einen Stand ergibt, den das Update ablehnt.
    - Pflichtfeld für die Commit-Nachricht, Schaltflächen **Save** und **Back**. Nach Erfolg zeigt die Schaltfläche „Success“, und die Liste wird neu geladen.
@@ -214,23 +214,23 @@ Autor ist der GitHub-Account des Token-Inhabers.
 ### 6.6 Update (Repo-Stand in die App übernehmen)
 Ziel ist der Branch-HEAD oder ein in der Commit-Auswahl gewählter älterer Commit oder Tag. Über das Aufklappmenü lassen sich die Teile wählen: Load script, App Objects, Attached files (Default: alle).
 
-1. Der Zielstand wird als ZIP in einem Aufruf geladen (`zipball/<commit>`) und vollständig geprüft, bevor die App angefasst wird: jede JSON-Datei muss sich lesen lassen, keine Datei darf Konfliktmarken (`<<<<<<<`) enthalten, und `tab_order.txt` muss zu den Tab-Dateien passen. Bei Fehlern bricht das Update mit der Liste der betroffenen Dateien ab. Danach erzeugt `update-planner` die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
+1. Der Zielstand wird als einzelne Blobs geladen, und zwar nur die gepflegten Dateien und nur die, die vom App-Stand abweichen (`builds/` wird so nie geladen). Er wird vollständig geprüft, bevor die App angefasst wird: jede JSON-Datei muss sich lesen lassen, keine Datei darf Konfliktmarken (`<<<<<<<`) enthalten, und `tab_order.txt` muss zu den Tab-Dateien passen. Heißt eine Variable des Zielstands wie eine Skript-Variable der App, startet das Update nicht (`variable-name-taken`); ein Namenstausch läuft über Zwischennamen, und die Umbenennungen laufen in einer Reihenfolge, in der nie zwei Variablen denselben Namen tragen. Vorschau und Update lesen die App je einmal; das Update plant mit dem frischen Stand neu. Bei Fehlern bricht das Update mit der Liste der betroffenen Dateien ab. Danach erzeugt `update-planner` die Aktionsliste. Anlegen und Ändern in der Reihenfolge App-Eigenschaften → Variablen → Master-Dimensionen/-Measures → Master-Visualisierungen → Sheets → Stories → statische Dateien → Skript; Löschen in umgekehrter Reihenfolge. Objekte werden mit ihrer ursprünglichen ID angelegt.
 2. Bestätigungsdialog „Update Application from the repository?“ mit dem gewählten Commit (Link nach GitHub), der Vorschau „X anlegen, Y ändern, Z löschen“ mit aufklappbarer Liste und den Schaltflächen **Update** und **Cancel**.
-3. Hat die App lokale Änderungen, werden sie zuerst gesichert: Commit des aktuellen App-Stands mit Parent `syncedSha` auf einen neuen Branch `backup/<branch>-<JJJJMMTT-hhmm>`. Der Sicherungs-Branch lässt sich auf GitHub per Pull Request wieder einbringen oder per Update zurückholen.
+3. Hat die App lokale Änderungen und ändert das Update etwas, werden sie zuerst gesichert: Commit des aktuellen App-Stands mit Parent `syncedSha` auf einen neuen Branch `backup/<branch>-<JJJJMMTT-hhmm>`. Der Sicherungs-Branch lässt sich auf GitHub per Pull Request wieder einbringen oder per Update zurückholen.
 4. Aktionen ausführen, danach `DoSave`. Fortschritt in der Fußzeile; die Update-Schaltfläche zeigt am Ende „Success“. Geschrieben werden nur Objekte, die sich vom Zielstand unterscheiden.
 5. `syncedSha` = übernommener Commit, sofern er auf dem Branch liegt. Wurde nur ein Teil übernommen, erscheinen die übrigen Unterschiede als lokale Änderungen. Liegt das Ziel nicht auf dem Branch (Tag oder Sicherungs-Branch außerhalb), bleibt `syncedSha` unverändert, und der übernommene Stand erscheint insgesamt als lokale Änderung. Es gibt keinen automatischen Commit.
-6. Veröffentlichte Apps und Apps ohne Schreibrecht: Update ist gesperrt. Eine veröffentlichte App ändert sich nur durch „Publish and replace“ in der QMC.
+6. Veröffentlichte Apps und Apps ohne Schreibrecht (`permissions.update` des App-Layouts): Update ist gesperrt. Das Update führt ein Journal in `chrome.storage.session`; bricht es ab, zeigt das Panel den Hinweis „The last update did not finish …“, bis ein neues Update ihn entfernt. Eine veröffentlichte App ändert sich nur durch „Publish and replace“ in der QMC.
 
 ### 6.7 History und Diff
 - **History:** Commits des Branches (paginiert, 30 pro Seite) mit Autor, Datum, Nachricht, Tag-Badges. Aktionen: „Diff to previous“, „Diff to app“, „Add tag“, „Update app to this commit“.
-- **Diff („details“):** Overlay in der Qlik-Seite; links die geänderten Objekte nach Typ mit Titel, rechts die Gegenüberstellung. Skripte zeilenweise nebeneinander (je Tab), JSON als Zeilen-Diff.
+- **Diff („details“):** Overlay in der Qlik-Seite; links die geänderten Objekte nach Typ mit Titel, rechts die Gegenüberstellung. Skripte zeilenweise nebeneinander (je Tab), JSON als Zeilen-Diff. Im Kopf rechts zwei Symbole: □ „Maximize“ legt das Overlay randlos über das ganze Fenster, ❐ „Restore“ stellt den Rahmen wieder her; ✕ „Close“ schließt es. Die Wahl gilt für weitere Overlays im selben Tab, bis die Seite neu geladen wird.
 - **Pull Request:** Auf einem Branch ungleich Default-Branch zeigt das Panel den Link „Open pull request on GitHub“ (öffnet die Vergleichsseite `compare/<default>...<branch>`).
 
 ### 6.8 Tags
-Annotiertes Git-Tag auf einem Commit (Name + optionale Beschreibung). Der Name wird gegen die Git-Regeln geprüft; ein bestehender Name wird nicht überschrieben. Der Reiter „Tags“ listet alle Tags mit Datum, Commit und den Aktionen „Diff to app“ und „Update app to this tag“.
+Annotiertes Git-Tag auf einem Commit (Name + optionale Beschreibung). Der Name wird gegen die Git-Regeln geprüft; ein bestehender Name wird nicht überschrieben. Das Datum eines Tags ist das Datum des Taggers, bei leichtgewichtigen Tags das Commit-Datum. Der Reiter „Tags“ listet alle Tags mit Datum, Commit und den Aktionen „Diff to app“ und „Update app to this tag“.
 
 ### 6.9 Import (neue App aus Repo)
-Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem Server des aktiven Tabs wird eine neue App „<App-Name> (<branch|tag|sha7>)“ angelegt, befüllt und gespeichert. Daten werden nicht geladen. Die neue App ist nicht verknüpft; beim Öffnen kann der Nutzer sie verbinden oder einen Branch für sie anlegen. So lassen sich Stände auf andere Server übertragen.
+Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem Server des aktiven Tabs wird eine neue App „<App-Name> (<branch|tag|sha7>)“ angelegt, befüllt und gespeichert. Daten werden nicht geladen. Der App-Name stammt aus dem Titel der README, sonst aus dem Repo-Namen. Die neue App ist nicht verknüpft; beim Öffnen kann der Nutzer sie verbinden oder einen Branch für sie anlegen. So lassen sich Stände auf andere Server übertragen.
 
 ## 7. Fehlerbehandlung
 
@@ -278,7 +278,9 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 
 ## 9. Spike vor der Umsetzung
 
-**Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft).
+**Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft). Frage 6 hat die Abnahme von Plan 3 beantwortet: nein, Snapshots gehen verloren; sie werden seitdem eigens eingebettet (Abschnitt 4.4).
+
+**Für Plan 3:** Beide offenen Punkte prüft die Abnahme von Plan 3 (`docs/superpowers/acceptance/plan-3-checklist.md`, Schritte 13 und 6): Import und Vergleich einer App mit Story (Frage 6), Skript nach „Load script“ und Daten nach `DoSave` (Frage 7, Skriptteil).
 
 Mehrere Annahmen lassen sich nur am echten Server prüfen. Der erste Schritt des Implementierungsplans ist ein kurzer Spike gegen den Testserver, dessen Code nicht übernommen wird:
 
@@ -301,6 +303,7 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 - Pull Requests in der Extension anlegen
 - Publish App: Veröffentlichen aus der Extension, mit Prüfung, ob die App dem Stand von `main` entspricht, und optionalem Tag auf den veröffentlichten Commit
 - Verteilung (Chrome Web Store „nicht gelistet“ oder Gruppenrichtlinie)
+- Mehrdeutige Zuordnung einer App (eine App in zwei Branch-Tabellen) anzeigen
 - Apps-Manager, Qlik Cloud
 
 ## 11. Änderungen in Revision 9 (nach dem Spike)
@@ -342,3 +345,30 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 6.1 | Nennt eine veröffentlichte App ein Repo, das es nicht mehr gibt, zeigt das Panel den Nur-Lese-Hinweis und „Repository not found or no access.“, ohne „Unlink Repository“ und „Connect to existing repository“. | Die veröffentlichte „Sales Asia“ nennt in gitoqloks Angaben das gelöschte Repo `lr-bicc/sales-asia`; das Panel bot dort Unlink an, obwohl eine veröffentlichte App nur gelesen wird. |
 | 6.1 | Eine veröffentlichte App ohne Repository zeigt „No linked repository“ mit dem Nur-Lese-Hinweis, ohne „Create repository“ und „Connect to existing repository“. Die Flows lehnen beides für veröffentlichte Apps weiter ab. | Die veröffentlichte „Customs Preferences“ bot beide Schaltflächen an, die nur mit der Nur-Lese-Meldung antworteten; bei fehlendem Repo (Sales Asia) waren sie schon ausgeblendet. |
 | 6.1 | Scheitert das Laden des Status, zeigt das Panel nur die Fehlermeldung unter dem Kopf, nicht mehr die veraltete Ansicht darunter. Scheitert eine Aktion (etwa „Create repository“), bleibt ihre Ansicht stehen. | Ohne Token zeigte das Panel „No GitHub token configured.“ zweimal: oben für den Status und unten noch einmal für die Local Changes der alten Ansicht. |
+
+## 14. Änderungen in Revision 12 (aus der Umsetzung von Plan 3)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 6.6 | Der Zielstand wird als einzelne Blobs geladen, nur gepflegte Dateien und nur die vom App-Stand abweichenden (statt als ZIP); `builds/` wird so nie geladen. | Das ZIP hätte jede Datei geladen, auch das `.qvf` unter `builds/`, obwohl fast alles dem App-Stand schon entspricht. |
+| 6.6 | Vorschau und Update lesen die App je einmal; das Update plant mit dem frischen Stand neu. | Die Vorschau kann beim Bestätigen veraltet sein; ein zweites Lesen je Schritt hätte Ladezeit gekostet. |
+| 6.6 | Liegt eine Zielvariable auf dem Namen einer Skript-Variablen, startet das Update nicht (`variable-name-taken`); ein Namenstausch läuft über Zwischennamen, und die Umbenennungen laufen in einer Reihenfolge, in der nie zwei Variablen denselben Namen tragen. | Die Engine verbietet zwei Variablen mit demselben Namen; Skript-Variablen lassen sich nicht umbenennen. |
+| 6.6, 7 | Das Schreibrecht kommt aus `permissions.update` des App-Layouts; das Journal liegt in `chrome.storage.session`, der Hinweis lautet „The last update did not finish …“. | Ein abgebrochenes Update lässt die App halb geschrieben zurück; der Nutzer soll es erfahren und neu starten. |
+| 6.6 | Keine Sicherung, wenn das Update nichts ändert. | Ein Sicherungs-Branch ohne Unterschied zum Stand wäre Ballast auf GitHub. |
+| 6.8 | Das Datum eines Tags ist das Datum des Taggers, bei leichtgewichtigen Tags das Commit-Datum. | Leichtgewichtige Tags haben keinen Tagger. |
+| 6.9 | Der App-Name stammt aus dem Titel der README, sonst aus dem Repo-Namen. | Der Repo-Name entsteht aus dem App-Namen, verliert aber Zeichen und Schreibweise. |
+| 10 | „Mehrdeutige Zuordnung einer App (eine App in zwei Branch-Tabellen) anzeigen“ ist ein offener Punkt. | Die Auflösung nimmt die erste Zuordnung; ein Hinweis auf weitere gehört nicht mehr in Plan 3. |
+| 6.6, 6.9 | Ein Update ohne Änderungen schließt ein unterbrochenes Update ab (Speichern, Journal leeren) und setzt `syncedSha` auf den Zielstand, wenn dieser auf dem Branch liegt; der Dialog bietet dann „Update“ statt „Close“. Scheitert „Import“ schon beim Anlegen der App, lautet die Meldung „The app could not be created.“ mit der Meldung der Engine. | Ein Update, das nur Dateien betrifft, die es nie schreibt, ließ „Repository has N new commits“ und den Hinweis auf ein unterbrochenes Update für immer stehen; „The new app was created“ war bei einer fehlgeschlagenen Anlage falsch. |
+
+## 15. Änderungen in Revision 13 (aus der Abnahme von Plan 3)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 4.5, 6.5–6.7 | gitoqloks Format (skripterzeugte Variablen, fremde App-ID in Datei-URLs, `qMeta` in Wertefarben) ist kein Unterschied zwischen App und Repo. Die Dateien skripterzeugter Variablen entfernt die Option „Remove files no longer maintained“; der erste „Save changes“ schreibt das Format nicht mehr einmalig um. | Eine aus `main` importierte und verbundene „Supply Chain Performance“ zeigte 370 lokale Änderungen statt „No local changes“ (Erfolgskriterium 4); jedes Update über einem gitoqlok-Commit legte einen Sicherungs-Branch mit 370 Dateien an, und „Diff to app“ begann mit 357 gelöschten Variablen. |
+| 6.6 | Die Commit-Auswahl zeigt je Commit die ersten sieben Zeichen des SHA. | gitoqlok-Repos enthalten viele Commits mit gleicher Nachricht („Zwischen-Commit.“, „Update branches table“); nur das Datum unterschied sie. |
+| 6.6 | JSON-Dateien werden in einer GraphQL-Abfrage je 100 Dateien geladen, die übrigen einzeln. | Der Vergleich mit gitoqloks Format lädt beim ersten Öffnen bis zu 357 Variablen-Dateien. |
+| 6.7 | Escape im Panel schließt das Diff-Overlay ebenso wie Escape in der Seite. | Das Overlay liegt in der Qlik-Seite, der Fokus bleibt nach dem Klick im Panel; Escape wirkte erst nach einem Klick ins Overlay. |
+| 4.4 | Snapshots in Stories werden nach `SetFullPropertyTree` eigens eingebettet (vorübergehendes Snapshot-Bookmark, `EmbedSnapshotObject`). Ihre ID und die Auswahl beim Aufnehmen (`qBookmark`) werden nicht versioniert und gelten nicht als Unterschied. | Abnahme Schritt 13 (Spike-Frage 6): Eine aus `bonus-scorecards` importierte App hatte keine Snapshots; alle vier Stories erschienen als geändert. Die Engine übergeht `qEmbeddedSnapshotRef` in `SetFullPropertyTree` und vergibt beim Einbetten stets eine neue ID. |
+| 5 | Eine veröffentlichte App mit dem Link-Objekt einer Kopie (fremde `appId`) steht für ihre Zeile in der Branch-Tabelle, sonst für den Default-Branch, sobald dieser ihren Commit enthält; vorher für den Branch der Kopie. „Published from commit“ rückt auf den HEAD vor, wenn sich nur README oder nicht gepflegte Dateien unterscheiden. | Abnahme Schritt 15: Nach Merge und „Publish and replace“ zeigte die veröffentlichte „Supply Chain Performance“ Branch `Test` und den Commit der Kopie statt `main` und des Merge-Commits. |
+| 6.1, 6.5 | „Save changes“ ermittelt die lokalen Änderungen neu, bevor der Commit-Modus öffnet, und ist auch bei leerer Liste aktiv. | Abnahme Schritt 15: Ein Sheet wurde umbenannt, nachdem das Panel die Liste geladen hatte; der Commit-Dialog zeigte die alte Liste, und der Commit enthielt die Umbenennung nicht. |
+| 6.7 | Das Diff-Overlay lässt sich maximieren (□/❐) und schließt über ✕ statt „Close“. | Wunsch aus der Abnahme: mehr Platz für lange Diffs. |

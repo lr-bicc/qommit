@@ -1,4 +1,4 @@
-import { repoSlug, repoSlugWithId, parseBranchTable, upsertBranchRow, canonicalAppId, findBranchForApp, createReadme }
+import { repoSlug, repoSlugWithId, parseBranchTable, upsertBranchRow, canonicalAppId, findBranchForApp, createReadme, readmeTitle }
   from "../../src/core/repo-layout";
 
 test("slugs", () => {
@@ -114,4 +114,21 @@ test("canonicalAppId falls back to the first row with an app id", () => {
   const rows = [{ branch: "x", appUrl: "u", appId: null }, { branch: "dev", appUrl: "u", appId: "id-dev" }];
   expect(canonicalAppId(rows, "main")).toBe("id-dev");
   expect(canonicalAppId([], "main")).toBeNull();
+});
+
+const base = { appTitle: "Demo", creatorLogin: "rv", createdAt: new Date("2026-11-11T10:00:00Z"), sheets: [], defaultBranch: "main", appUrl: `https://qs.example.com/qs/sense/app/${A}` };
+test("branch names with | and URLs with ) survive the table", () => {
+  const readme = upsertBranchRow(createReadme({ ...base, defaultBranch: "main" }), { branch: "a|b", appUrl: "https://q/x (1)" });
+  expect(readme).toContain("a\\|b|[https://q/x%20%281%29]");
+  expect(parseBranchTable(readme).find((r) => r.branch === "a|b")?.appUrl).toBe("https://q/x%20%281%29");
+  expect(upsertBranchRow(readme, { branch: "a|b", appUrl: "https://q/y" }).match(/a\\\|b/g)).toHaveLength(1);
+});
+test("sheet titles and descriptions cannot break the sheet table", () => {
+  const md = createReadme({ ...base, sheets: [{ title: "A|B", description: "line1\nline2 | x" }] });
+  expect(md).toContain("A\\|B|line1 line2 \\| x\n");
+});
+test("readmeTitle reads the app title, also from gitoqlok READMEs", () => {
+  expect(readmeTitle("# Qlik Application Repository\n# Sales 📈\n")).toBe("Sales 📈");
+  expect(readmeTitle("# Qlik Application Repository \r\n# Demo\r\n")).toBe("Demo");
+  expect(readmeTitle("no heading")).toBeNull();
 });

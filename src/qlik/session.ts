@@ -1,7 +1,7 @@
 import schema from "enigma.js/schemas/12.2027.0.json";
 import type { EngineApi } from "./engine-types";
 import { engineUrl, type QlikLocation } from "./location";
-import { QlikTimeoutError, withTimeout } from "./timeout";
+import { engineCall, QlikTimeoutError, withTimeout } from "./timeout";
 
 /** Opening the socket and the document together. */
 const OPEN_TIMEOUT_MS = 20_000;
@@ -100,4 +100,46 @@ export async function openSession(
     if (e instanceof QlikTimeoutError) throw new QlikSessionError(e.message);
     throw new QlikSessionError(messageOf(e));
   }
+}
+
+/** Opens the global engine session (no app), e.g. to create an app. */
+export async function openGlobal(
+  loc: { origin: string; prefix: string },
+  deps: { fetch: typeof fetch; create: EnigmaCreate },
+): Promise<{ global: EngineApi; close(): Promise<void> }> {
+  const token = await fetchCsrfToken(loc, deps.fetch);
+  const base = `wss://${new URL(loc.origin).host}${loc.prefix}/app/engineData`;
+  const session = deps.create({
+    schema,
+    url: token ? `${base}?qlik-csrf-token=${encodeURIComponent(token)}` : base,
+    createSocket: (url) => new WebSocket(url),
+  });
+  const close = async (): Promise<void> => {
+    try {
+      await session.close();
+    } catch {
+      // already closed or never fully opened
+    }
+  };
+  try {
+    const global = await withTimeout(session.open(), OPEN_TIMEOUT_MS, "Qlik did not answer in time.");
+    return { global, close };
+  } catch (e) {
+    void close(); // closing a socket that never answered may not settle either
+    if (e instanceof QlikTimeoutError) throw new QlikSessionError(e.message);
+    throw new QlikSessionError(messageOf(e));
+  }
+}
+
+/** Creates an empty app on the server and returns its id. */
+export async function createApp(global: EngineApi, name: string): Promise<string> {
+  let res: { qSuccess?: boolean; qAppId?: string } | undefined;
+  try {
+    res = await engineCall(global.createApp(name));
+  } catch (e) {
+    if (e instanceof QlikTimeoutError) throw new QlikSessionError(e.message);
+    throw e;
+  }
+  if (res?.qSuccess !== true || typeof res.qAppId !== "string" || res.qAppId === "") throw new QlikSessionError("Could not create the app");
+  return res.qAppId;
 }

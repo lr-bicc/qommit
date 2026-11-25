@@ -1,4 +1,4 @@
-import { fetchCsrfToken, openSession, QlikSessionError } from "../../src/qlik/session";
+import { createApp, fetchCsrfToken, openGlobal, openSession, QlikSessionError } from "../../src/qlik/session";
 import type { EnigmaCreate, EnigmaSession } from "../../src/qlik/session";
 import type { EngineApi } from "../../src/qlik/engine-types";
 
@@ -152,5 +152,57 @@ describe("openSession", () => {
       expect(s.user).toBe("r.vasilev");
       expect(vi.getTimerCount()).toBe(0);
     });
+  });
+});
+
+describe("openGlobal and createApp", () => {
+  test("openGlobal opens the engineData endpoint with the token", async () => {
+    const f = fakeFetch(new Response(null, { status: 204, headers: { "qlik-csrf-token": "t/1" } }));
+    const m = makeCreate();
+    const g = await openGlobal(loc, { fetch: f, create: m.create });
+    expect(m.create.mock.calls[0][0].url).toBe("wss://host/qs/app/engineData?qlik-csrf-token=t%2F1");
+    expect(g.global).toBe(m.global);
+    await g.close();
+    expect(m.close).toHaveBeenCalled();
+  });
+  test("openGlobal without a token uses the bare url; a failed open is a QlikSessionError", async () => {
+    const m = makeCreate({ open: async () => { throw new Error("socket refused"); } });
+    const p = openGlobal(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create });
+    await expect(p).rejects.toBeInstanceOf(QlikSessionError);
+    await expect(p).rejects.toThrow("socket refused");
+    expect(m.create.mock.calls[0][0].url).toBe("wss://host/qs/app/engineData");
+    expect(m.close).toHaveBeenCalled();
+  });
+  test("createApp opens the engineData endpoint and returns the new id", async () => {
+    const m = makeCreate();
+    const createAppCall = vi.fn(async () => ({ qSuccess: true, qAppId: "new" }));
+    (m.global as unknown as Record<string, unknown>).createApp = createAppCall;
+    const g = await openGlobal(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create });
+    expect(m.create.mock.calls[0][0].url).toMatch(/\/qs\/app\/engineData$/);
+    expect(await createApp(g.global, "Sales (main)")).toBe("new");
+    expect(createAppCall).toHaveBeenCalledWith("Sales (main)");
+  });
+  test("createApp that never answers is a QlikSessionError after 30 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const global = { createApp: () => new Promise(() => {}) } as unknown as EngineApi;
+      const outcome = createApp(global, "x").catch((e) => e);
+      await vi.advanceTimersByTimeAsync(29_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await outcome;
+      expect(err).toBeInstanceOf(QlikSessionError);
+      expect(err.message).toBe("Qlik did not answer in time.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  test("createApp without qSuccess is a QlikSessionError", async () => {
+    const global = { createApp: async () => ({ qSuccess: false }) } as unknown as EngineApi;
+    await expect(createApp(global, "x")).rejects.toThrow("Could not create the app");
+    await expect(createApp(global, "x")).rejects.toBeInstanceOf(QlikSessionError);
   });
 });

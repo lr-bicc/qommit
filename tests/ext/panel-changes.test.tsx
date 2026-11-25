@@ -48,9 +48,12 @@ async function openCommit(bridge: FakeBridge): Promise<void> {
 const linkedBridge = (answers: Partial<Record<Command["cmd"], unknown[]>>): FakeBridge =>
   fakeBridge({ status: [view(LINKED)], ...answers });
 
+const panelOf = (bridge: FakeBridge) => ({ run: <T,>(command: Command): Promise<T> => bridge.send<T>(command), isBusy: () => false, busy: false });
+
 test("saves the selected paths, shows Success and loads status and changes again", async () => {
-  const bridge = linkedBridge({ localChanges: [changes(TWO, ["loadScript.qvs"]), changes([])], commit: [{ sha: "n".repeat(40) }] });
-  const second = hold(bridge, "localChanges", 2);
+  // Loads: opening the panel, "Save changes", after the commit.
+  const bridge = linkedBridge({ localChanges: [changes(TWO, ["loadScript.qvs"]), changes(TWO, ["loadScript.qvs"]), changes([])], commit: [{ sha: "n".repeat(40) }] });
+  const second = hold(bridge, "localChanges", 3);
   await openCommit(bridge);
   fireEvent.click(check("Overview"));
   fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
@@ -111,10 +114,39 @@ test("only unmaintained files can be removed on their own", async () => {
   expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
 });
 
-test("Save changes is locked without entries and without unmaintained files", async () => {
-  render(<App bridge={linkedBridge({ localChanges: [changes([])] })} />);
+test("Save changes reads the app again; with nothing to save the list stays", async () => {
+  const bridge = linkedBridge({ localChanges: [changes([])] });
+  render(<App bridge={bridge} />);
   await screen.findByText("No local changes");
-  expect((screen.getByText("Save changes") as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(bridge.commands.filter((c) => c.cmd === "localChanges")).toHaveLength(2));
+  await flush();
+  expect(screen.queryByText("Choose what to save")).toBeNull();
+  expect(screen.getByText("No local changes")).toBeTruthy();
+});
+
+test("Save changes starts from what the app holds now, not from the list shown before", async () => {
+  // The panel was opened before the sheets were changed in Qlik.
+  const bridge = linkedBridge({ localChanges: [changes([], ["loadScript.qvs"]), changes(TWO, ["loadScript.qvs"])], commit: [{ sha: "n".repeat(40) }] });
+  render(<App bridge={bridge} />);
+  await screen.findByText("No local changes");
+  fireEvent.click(screen.getByText("Save changes"));
+  await screen.findByText("Choose what to save");
+  expect(check("Overview").checked).toBe(true);
+  expect(check("Details").checked).toBe(true);
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Rename" } });
+  fireEvent.click(screen.getByText("Save"));
+  await screen.findByText("Success");
+  expect(bridge.commands.find((c) => c.cmd === "commit")).toMatchObject({ paths: ["objects/sheets/s1.json", "objects/sheets/s2.json"], removeUnmaintained: true });
+});
+
+test("a failed load on Save changes shows the error and stays out of the commit mode", async () => {
+  const bridge = linkedBridge({ localChanges: [changes(TWO), new BridgeError({ code: "network", message: "x" })] });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Save changes"));
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("Network error.")).toBeTruthy();
+  expect(screen.queryByText("Choose what to save")).toBeNull();
 });
 
 test("checkboxes of parts and groups follow their entries", async () => {
@@ -176,7 +208,7 @@ test("behind: the dialog lists the commits, Cancel keeps message and selection",
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).getByText("The branch has 1 new commit that this save would overwrite:")).toBeTruthy();
   expect(within(dialog).getByText("theirs")).toBeTruthy();
-  expect(within(dialog).getByText("Updating the app is not part of this version yet.")).toBeTruthy();
+  expect(within(dialog).getByText("Update first")).toBeTruthy();
   fireEvent.click(within(dialog).getByText("Cancel"));
   expect(screen.queryByRole("dialog")).toBeNull();
   expect((screen.getByPlaceholderText("Commit message") as HTMLTextAreaElement).value).toBe("Fix");
@@ -291,7 +323,7 @@ test("collapsed groups still count towards the selection", async () => {
 
 test("a published app shows the list only", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO)] });
-  render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={true} onSaved={() => undefined} />);
+  render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={true} onSaved={() => undefined} />);
   await screen.findByText("Overview");
   expect(screen.queryByText("Save changes")).toBeNull();
 });
@@ -302,34 +334,34 @@ test("Refresh in the header loads the local changes again", async () => {
   await screen.findByText("Overview");
   fireEvent.click(screen.getByLabelText("Refresh"));
   await screen.findByText("No local changes");
-  expect(bridge.commands.map((c) => c.cmd)).toEqual(["status", "localChanges", "status", "localChanges"]);
+  expect(bridge.commands.map((c) => c.cmd).filter((c) => !["listBranches", "tags", "commits"].includes(c))).toEqual(["status", "localChanges", "status", "localChanges"]);
 });
 
 test("a changed reload token loads the changes again", async () => {
   const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])] });
-  const { rerender } = render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={0} />);
+  const { rerender } = render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={0} />);
   await screen.findByText("Overview");
-  rerender(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={1} />);
+  rerender(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={() => undefined} reloadToken={1} />);
   await screen.findByText("No local changes");
 });
 
 test("onSaved is called after a successful save", async () => {
-  const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])], commit: [{ sha: "n" }] });
+  const bridge = fakeBridge({ localChanges: [changes(TWO), changes(TWO), changes([])], commit: [{ sha: "n" }] });
   const onSaved = vi.fn();
-  render(<LocalChangesTab bridge={bridge} appId={APP_ID} readOnly={false} onSaved={onSaved} />);
+  render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={onSaved} />);
   fireEvent.click(await screen.findByText("Save changes"));
-  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
+  fireEvent.input(await screen.findByPlaceholderText("Commit message"), { target: { value: "Fix" } });
   fireEvent.click(screen.getByText("Save"));
   await screen.findByText("No local changes");
   expect(onSaved).toHaveBeenCalledTimes(1);
 });
 
 const commitsOf = (n: number, offset = 0) =>
-  Array.from({ length: n }, (_, i) => ({ sha: `${String(i + offset).padStart(2, "0")}abcdef0123456789`, message: `msg ${i + offset}\nbody`, author: "Ann", date: "2026-11-01T10:00:00Z" }));
+  Array.from({ length: n }, (_, i) => ({ sha: `${String(i + offset).padStart(2, "0")}abcdef0123456789`, message: `msg ${i + offset}\nbody`, author: "Ann", date: "2026-11-01T10:00:00Z", parents: [] }));
 
 test("history lists the commits and links the short sha", async () => {
   const bridge = fakeBridge({ history: [{ commits: commitsOf(2), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   await screen.findByText("msg 0");
   expect(screen.getByText("msg 1")).toBeTruthy();
   expect(screen.queryByText(/body/)).toBeNull();
@@ -339,12 +371,12 @@ test("history lists the commits and links the short sha", async () => {
   expect(link.getAttribute("href")).toBe("https://github.com/lr-bicc/sales/commit/00abcdef0123456789");
   expect(screen.queryByText("Open pull request on GitHub")).toBeNull();
   expect(screen.queryByText("Load more")).toBeNull();
-  expect(bridge.commands).toEqual([{ cmd: "history", page: 1 }]);
+  expect(bridge.commands.filter((c) => c.cmd === "history")).toEqual([{ cmd: "history", page: 1 }]);
 });
 
 test("history of a side branch links to the pull request", async () => {
   const bridge = fakeBridge({ history: [{ commits: commitsOf(1), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="dev/x" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="dev/x" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   const link = (await screen.findByText("Open pull request on GitHub")) as HTMLAnchorElement;
   expect(link.getAttribute("href")).toBe("https://github.com/lr-bicc/sales/compare/main...dev/x");
   expect(link.getAttribute("target")).toBe("_blank");
@@ -352,22 +384,22 @@ test("history of a side branch links to the pull request", async () => {
 
 test("Load more appears after a full page and appends the next one", async () => {
   const bridge = fakeBridge({ history: [{ commits: commitsOf(30), defaultBranch: "main" }, { commits: commitsOf(2, 30), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   fireEvent.click(await screen.findByText("Load more"));
   await screen.findByText("msg 31");
   expect(screen.getByText("msg 0")).toBeTruthy();
   expect(screen.queryByText("Load more")).toBeNull();
-  expect(bridge.commands).toEqual([{ cmd: "history", page: 1 }, { cmd: "history", page: 2 }]);
+  expect(bridge.commands.filter((c) => c.cmd === "history")).toEqual([{ cmd: "history", page: 1 }, { cmd: "history", page: 2 }]);
 });
 
 test("history without commits says so", async () => {
-  render(<HistoryTab bridge={fakeBridge({ history: [{ commits: [], defaultBranch: "main" }] })} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={fakeBridge({ history: [{ commits: [], defaultBranch: "main" }] })} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   await screen.findByText("No commits");
 });
 
 test("a failed history load shows the error and Retry loads again", async () => {
   const bridge = fakeBridge({ history: [new BridgeError({ code: "network", message: "x" }), { commits: commitsOf(1), defaultBranch: "main" }] });
-  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" />);
+  render(<HistoryTab bridge={bridge} repo="lr-bicc/sales" branch="main" defaultBranch="main" canUpdate={false} onAddTag={() => undefined} onUpdate={() => undefined} />);
   fireEvent.click(within(await screen.findByRole("alert")).getByText("Retry"));
   await screen.findByText("msg 0");
 });
@@ -422,7 +454,7 @@ test("a failed Commit anyway stays in the dialog and sends allowBehind only per 
 
 test("a failed reload after a save shows the error with Retry", async () => {
   const bridge = linkedBridge({
-    localChanges: [changes(TWO), new BridgeError({ code: "network", message: "x" }), changes([])],
+    localChanges: [changes(TWO), changes(TWO), new BridgeError({ code: "network", message: "x" }), changes([])],
     commit: [{ sha: "n" }],
   });
   await openCommit(bridge);

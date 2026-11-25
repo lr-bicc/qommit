@@ -1,4 +1,4 @@
-import { createContentFiles } from "../../src/qlik/content-files";
+import { createContentFiles, createContentStore } from "../../src/qlik/content-files";
 import { QlikReadError, readApp } from "../../src/qlik/reader";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
 import { appFromSnapshot, fakeDoc } from "./fake-engine";
@@ -128,5 +128,61 @@ describe("readApp with files", () => {
     const fake = fakeDoc({ ...base(), libraryFiles: [`/appcontent/${APP_ID}/a.png`] });
     expect((await readApp(fake.doc, APP_ID, { published: false })).staticFiles.size).toBe(0);
     expect(fake.calls.some((c) => c.startsWith("getContentLibraries"))).toBe(false);
+  });
+});
+
+describe("createContentStore", () => {
+  interface Seen { line: string; headers: Record<string, string>; body: unknown }
+  const recorder = (status: number) => {
+    const seen: Seen[] = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push({ line: `${init?.method} ${String(url)}`, headers: (init?.headers ?? {}) as Record<string, string>, body: init?.body });
+      return new Response(null, { status });
+    }) as typeof fetch;
+    return { seen, fetchFn };
+  };
+  const xrfkeyOf = (line: string): string => /xrfkey=([^&]+)/.exec(line)![1]!;
+
+  test("upload and delete go to the QRS with an xrfkey", async () => {
+    const { seen, fetchFn } = recorder(201);
+    const store = createContentStore(loc, "app1", fetchFn);
+    const bytes = new Uint8Array([1]);
+    await store.put("Stock Availability.png", bytes);
+    await store.remove("Stock Availability.png");
+    expect(seen[0]!.line).toMatch(/^POST https:\/\/host\/qs\/qrs\/appcontent\/app1\/uploadfile\?externalpath=Stock%20Availability\.png&overwrite=true&xrfkey=[A-Za-z0-9]{16}$/);
+    expect(seen[0]!.headers["X-Qlik-Xrfkey"]).toBe(xrfkeyOf(seen[0]!.line));
+    expect(seen[0]!.headers["Content-Type"]).toBe("application/octet-stream");
+    expect(seen[0]!.body).toBe(bytes);
+    expect(seen[1]!.line).toMatch(/^DELETE https:\/\/host\/qs\/qrs\/appcontent\/app1\/deletecontent\?externalpath=Stock%20Availability\.png&xrfkey=[A-Za-z0-9]{16}$/);
+    expect(seen[1]!.headers["X-Qlik-Xrfkey"]).toBe(xrfkeyOf(seen[1]!.line));
+    expect(xrfkeyOf(seen[0]!.line)).not.toBe(xrfkeyOf(seen[1]!.line));
+  });
+  test("a failed upload names the file", async () => {
+    const store = createContentStore(loc, "app1", recorder(403).fetchFn);
+    await expect(store.put("a.png", new Uint8Array([1]))).rejects.toThrow("Could not upload a.png: HTTP 403");
+  });
+  test("a failed delete names the file", async () => {
+    const store = createContentStore(loc, "app1", recorder(500).fetchFn);
+    await expect(store.remove("a.png")).rejects.toThrow("Could not delete a.png: HTTP 500");
+  });
+  test("a network failure names the file", async () => {
+    const store = createContentStore(loc, "app1", (async () => { throw new TypeError("net down"); }) as typeof fetch);
+    await expect(store.put("a.png", new Uint8Array([1]))).rejects.toThrow("Could not upload a.png: net down");
+  });
+  test("a request that never answers is cut off after 60 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createContentStore(loc, "app1", (() => new Promise<Response>(() => {})) as unknown as typeof fetch);
+      const outcome = store.put("a.png", new Uint8Array([1])).catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(59_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(((await outcome) as Error).message).toBe("Could not upload a.png: Qlik did not answer in time.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

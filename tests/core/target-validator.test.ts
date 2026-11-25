@@ -1,7 +1,7 @@
-import { validateTarget } from "../../src/core/target-validator";
+import { validateTarget, variableNameConflicts } from "../../src/core/target-validator";
 import { serializeApp } from "../../src/core/serializer";
 import { makeSnapshot, CANON_ID } from "../fixtures/snapshot";
-import type { FileMap } from "../../src/core/types";
+import type { AppSnapshot, FileMap, GenericProps } from "../../src/core/types";
 const TAB_ORDER = "data_load_script/tab_order.txt";
 const good = () => serializeApp(makeSnapshot(), { canonicalAppId: CANON_ID });
 
@@ -118,4 +118,14 @@ test("one problem per path: conflict markers before invalid json before invalid 
     { path: "objects/measures/mes-1.json", reason: "conflict-markers" },
     { path: "objects/sheets/sh-1.json", reason: "invalid-object" },
   ]);
+});
+
+const snap = (variables: GenericProps[]): AppSnapshot => ({ ...makeSnapshot(), variables });
+const v = (id: string, qName: string, extra: Record<string, unknown> = {}): GenericProps => ({ qInfo: { qId: id, qType: "variable" }, qName, qDefinition: "1", ...extra });
+test("a target variable that takes the name of a script variable is a conflict", () => {
+  const app = snap([v("s", "vToday", { qIsScriptCreated: true })]);
+  const target = snap([v("x", "vToday")]);
+  expect(variableNameConflicts(app, target)).toEqual([{ path: "objects/variables/x.json", reason: "variable-name-taken" }]);
+  expect(variableNameConflicts(app, snap([v("s", "vToday")]))).toEqual([]); // same id is no conflict
+  expect(variableNameConflicts(snap([v("n", "vToday")]), target)).toEqual([]); // ordinary variables can be renamed away
 });

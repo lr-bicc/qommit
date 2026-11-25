@@ -1,11 +1,13 @@
+import { groupOf } from "../../src/core/diff";
 import { gitBlobSha } from "../../src/core/git-hash";
+import { serializeApp } from "../../src/core/serializer";
 import { createRouter } from "../../src/ext/content/router";
 import { handleGateway } from "../../src/ext/background/gateway";
 import type { Command, CommandResult, ProgressEvent } from "../../src/ext/shared/commands";
 import { createGitHubPort, type GatewayRequest, type GatewayResponse } from "../../src/ext/shared/github-port";
 import type { EngineSession } from "../../src/qlik/session";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
-import { fakeCache } from "../ext/fake-ports";
+import { fakeCache, fakeServer, memoryJournal } from "../ext/fake-ports";
 import { appFromSnapshot, fakeDoc } from "../qlik/fake-engine";
 
 const TOKEN = "ghp_integrationSecret42";
@@ -62,7 +64,7 @@ function memoryGitHub() {
     }
     return seen;
   };
-  const rawCommit = (c: Commit) => ({ sha: c.sha, commit: { message: c.message, author: { name: "octocat", date: "2026-01-02T03:04:05Z" } } });
+  const rawCommit = (c: Commit) => ({ sha: c.sha, parents: c.parents.map((sha) => ({ sha })), commit: { message: c.message, author: { name: "octocat", date: "2026-01-02T03:04:05Z" } } });
   const bytesToBase64 = (b: Uint8Array): string => btoa(String.fromCharCode(...b));
 
   async function handle(method: string, path: string, body: any): Promise<Response> {
@@ -106,6 +108,10 @@ function memoryGitHub() {
       const tree = commit ? trees.get(commit.tree) : undefined;
       if (!tree) return notFound();
       return json({ truncated: false, tree: [...tree].map(([p, sha]) => ({ path: p, type: "blob", sha })) });
+    }
+    if (method === "GET" && (g = /^\/git\/blobs\/([0-9a-f]+)$/.exec(rest))) {
+      const blob = blobs.get(g[1]!);
+      return blob ? json({ content: bytesToBase64(blob), encoding: "base64" }) : notFound();
     }
     if (method === "GET" && (g = /^\/contents\/(.+)$/.exec(rest))) {
       const sha = resolve(params.get("ref") ?? "");
@@ -205,10 +211,12 @@ function memoryGitHub() {
     head: (repo: string, branch: string) => repos.get(repo)!.branches.get(branch)!,
     message: (repo: string, sha: string) => repos.get(repo)!.commits.get(sha)!.message,
     parents: (repo: string, sha: string) => repos.get(repo)!.commits.get(sha)!.parents,
+    branches: (repo: string) => [...repos.get(repo)!.branches.keys()],
   };
 }
 
-test("router, gateway and GitHub work together: connect, read, change, save", async () => {
+/** Router, gateway (JSON copies like chrome.runtime) and the in-memory GitHub around one app in the fake engine. */
+async function createWorld() {
   const gh = memoryGitHub();
   await gh.createRepo(`${ORG}/other`, "# other\n"); // an unrelated repository the app must not be matched with
 
@@ -225,9 +233,11 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
     });
     return JSON.parse(JSON.stringify(response));
   };
+  const port = createGitHubPort(viaMessage);
 
   const events: ProgressEvent[] = [];
   const results: CommandResult[] = [];
+  const server = fakeServer();
   let clock = 0;
   const router = createRouter({
     currentUrl: () => PAGE,
@@ -235,7 +245,7 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
       let closed = false;
       return { doc: fakeDoc(app).doc, appId: loc.appId, user: "r.vasilev", isClosed: () => closed, close: async () => { closed = true; } };
     },
-    github: createGitHubPort(viaMessage),
+    github: port,
     cache: fakeCache(),
     loadOptions: async () => ({ org: ORG, repoPrefix: "", servers: [] }),
     // Qlik's static file comes from the app content, everything else is not expected here.
@@ -246,6 +256,10 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
     }) as typeof fetch,
     now: () => new Date((clock += 1000)),
     emit: (e) => { events.push(e); },
+    journal: memoryJournal(),
+    server: () => server,
+    showDiff: () => {},
+    closeDiff: () => false,
   });
   const run = async (command: Command): Promise<CommandResult> => {
     const result = await router(command);
@@ -256,6 +270,14 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
     if (!result.ok) throw new Error(`command failed: ${JSON.stringify(result.error)}`);
     return result.value as T;
   };
+  return { gh, app, port, server, events, results, run, value };
+}
+
+const sheetTitle = (app: ReturnType<typeof appFromSnapshot>): unknown =>
+  (app.objects.find((o) => o.props.qInfo.qId === "sh-1")!.props.qMetaDef as { title: string }).title;
+
+test("router, gateway and GitHub work together: connect, read, change, save", async () => {
+  const { gh, app, events, results, run, value } = await createWorld();
 
   // 1. nothing linked yet
   const first = value<{ page: string; status: { state: string } }>(await run({ cmd: "status" }));
@@ -311,4 +333,101 @@ test("router, gateway and GitHub work together: connect, read, change, save", as
   for (const result of results) expect(JSON.stringify(result)).not.toContain(TOKEN);
   expect(events.length).toBeGreaterThan(0);
   for (const event of events) expect(JSON.stringify(event)).not.toContain(TOKEN);
+});
+
+/** The repository state after a second person changed the sheet title on main. Returns the new head. */
+async function pushSheetTitle(w: Awaited<ReturnType<typeof createWorld>>, repo: string, branch: string, title: string): Promise<string> {
+  const path = "objects/sheets/sh-1.json";
+  const text = new TextDecoder().decode(w.gh.fileAt(repo, branch, path)!);
+  expect(text).toContain('"Overview"');
+  return w.port.commitFiles(repo, {
+    branch, parentSha: w.gh.head(repo, branch), message: `Rename sheet to ${title}`,
+    changes: [{ path, content: text.replace('"Overview"', JSON.stringify(title)) }],
+  });
+}
+
+type StatusValue = { status: { state: string; behindBy: number; link: { syncedSha: string; branch: string } } };
+type UpdateValue = { syncedSha: string; backupBranch: string | null; applied: number };
+
+test("copy behind main: update to the head, then no local changes and no new commits", async () => {
+  const w = await createWorld();
+  const link = w.value<{ repo: string; branch: string; syncedSha: string }>(await w.run({ cmd: "createRepository", appId: APP_ID }));
+  const head = await pushSheetTitle(w, link.repo, link.branch, "Overview v2");
+  const behind = w.value<StatusValue>(await w.run({ cmd: "status" }));
+  expect(behind.status).toMatchObject({ state: "linked", behindBy: 1 });
+
+  const preview = w.value<{ localChanges: number; onBranch: boolean; items: unknown[] }>(
+    await w.run({ cmd: "updatePreview", appId: APP_ID, target: head, parts: ["script", "objects", "files"] }));
+  expect(preview).toMatchObject({ localChanges: 0, onBranch: true });
+  expect(preview.items.length).toBeGreaterThan(0);
+  expect(sheetTitle(w.app)).toBe("Overview"); // a preview writes nothing
+
+  const done = w.value<UpdateValue>(await w.run({ cmd: "update", appId: APP_ID, target: head, parts: ["script", "objects", "files"] }));
+  expect(done).toMatchObject({ syncedSha: head, backupBranch: null });
+  expect(done.applied).toBeGreaterThan(0);
+  expect(sheetTitle(w.app)).toBe("Overview v2");
+
+  expect(w.value<{ items: unknown[] }>(await w.run({ cmd: "localChanges" })).items).toEqual([]);
+  const after = w.value<StatusValue>(await w.run({ cmd: "status" }));
+  expect(after.status).toMatchObject({ state: "linked", behindBy: 0 });
+  expect(after.status.link.syncedSha).toBe(head);
+  expect(w.gh.branches(link.repo)).toEqual([link.branch]); // no backup without local changes
+  expect(w.gh.head(link.repo, link.branch)).toBe(head); // and no new commit
+});
+
+test("local changes survive an update on a backup branch and come back by updating to it", async () => {
+  const w = await createWorld();
+  const link = w.value<{ repo: string; branch: string; syncedSha: string }>(await w.run({ cmd: "createRepository", appId: APP_ID }));
+  const head = await pushSheetTitle(w, link.repo, link.branch, "Remote title");
+  w.app.objects.find((o) => o.props.qInfo.qId === "sh-1")!.props.qMetaDef = { title: "My title" }; // a local change
+  const parts: ("script" | "objects" | "files")[] = ["script", "objects", "files"];
+
+  // 1. update to the head: the local state goes to a backup branch first
+  const first = w.value<UpdateValue>(await w.run({ cmd: "update", appId: APP_ID, target: head, parts }));
+  expect(first.syncedSha).toBe(head);
+  expect(first.backupBranch).toMatch(/^backup\/main-\d{8}-\d{4}$/);
+  const backupHead = w.gh.head(link.repo, first.backupBranch!);
+  expect(w.gh.message(link.repo, backupHead)).toBe(`Backup before update to ${head.slice(0, 7)}`);
+  expect(w.gh.parents(link.repo, backupHead)).toEqual([link.syncedSha]);
+  expect(new TextDecoder().decode(w.gh.fileAt(link.repo, backupHead, "objects/sheets/sh-1.json")!)).toContain("My title");
+  expect(sheetTitle(w.app)).toBe("Remote title");
+  expect(w.value<{ items: unknown[] }>(await w.run({ cmd: "localChanges" })).items).toEqual([]);
+
+  // 2. update to the backup head, which is not on the app's branch: the earlier state is back, syncedSha stays
+  const second = w.value<UpdateValue>(await w.run({ cmd: "update", appId: APP_ID, target: backupHead, parts }));
+  expect(second).toMatchObject({ syncedSha: head, backupBranch: null });
+  expect(sheetTitle(w.app)).toBe("My title");
+  const status = w.value<StatusValue>(await w.run({ cmd: "status" }));
+  expect(status.status.link.syncedSha).toBe(head);
+  const changes = w.value<{ items: { group: string; kind: string; title: string }[] }>(await w.run({ cmd: "localChanges" }));
+  expect(changes.items).toHaveLength(1);
+  expect(changes.items[0]).toMatchObject({ group: "sheets", kind: "changed", title: "My title" });
+  expect(w.gh.branches(link.repo)).toEqual([link.branch, first.backupBranch]); // the second update needed no backup
+});
+
+test("import of a repository state and serialising the new app gives the same files (bookmarks excepted)", async () => {
+  const w = await createWorld();
+  const link = w.value<{ repo: string; branch: string; syncedSha: string }>(await w.run({ cmd: "createRepository", appId: APP_ID }));
+
+  const imported = w.value<{ appId: string; name: string; url: string }>(
+    await w.run({ cmd: "importApp", repo: link.repo, sha: link.syncedSha, label: link.branch }));
+  expect(imported.name).toBe("Sales Planning (main)");
+  expect(w.server.created).toHaveLength(1);
+  const created = w.server.created[0]!.app;
+  expect(created.saves).toBe(1);
+  expect(created.snapshot.bookmarks).toEqual([]); // bookmarks are never written
+
+  const stored = new Map<string, string | Uint8Array>();
+  for (const path of w.gh.pathsAt(link.repo, link.branch)) {
+    if (groupOf(path) === null || path.startsWith("objects/bookmarks/")) continue;
+    stored.set(path, w.gh.fileAt(link.repo, link.branch, path)!.slice());
+  }
+  const serialised = serializeApp(created.snapshot, { canonicalAppId: APP_ID });
+  expect([...serialised.keys()].sort()).toEqual([...stored.keys()].map(String).sort());
+  for (const [path, content] of serialised) {
+    const expected = stored.get(path)!;
+    const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
+    expect(bytes, path).toEqual(expected instanceof Uint8Array ? expected : new TextEncoder().encode(expected as string));
+  }
+  expect(created.snapshot.staticFiles.get("logo.png")).toEqual(BINARY);
 });

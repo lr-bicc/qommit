@@ -4,7 +4,7 @@ import { toJson } from "./serializer";
 
 export type AppObjectGroup = "appprops" | "variables" | "dimensions" | "measures" | "masterobjects" | "sheets" | "stories";
 export type Action =
-  | { op: "upsert"; group: AppObjectGroup; id: string; exists: boolean; payload: GenericProps | PropertyTree }
+  | { op: "upsert"; group: AppObjectGroup; id: string; exists: boolean; payload: GenericProps | PropertyTree; temporary?: true }
   | { op: "delete"; group: AppObjectGroup; id: string }
   | { op: "putFile"; name: string; exists: boolean; bytes: Uint8Array }
   | { op: "deleteFile"; name: string }
@@ -45,6 +45,67 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+/**
+ * Variables that swap names (a cycle of renames) cannot be written one by one, because the name
+ * each wants is still held by another. One variable per cycle (the lowest id) first moves to a
+ * temporary name, which frees its old name.
+ */
+function temporaryRenames(cur: Map<string, Payload>, tgt: Map<string, Payload>): Action[] {
+  const holderOfTarget = new Map<string, string>(); // target name -> id
+  for (const [id, p] of tgt) { const n = nameOf(p); if (n !== undefined) holderOfTarget.set(n, id); }
+  const renamed = (id: string): boolean => {
+    const c = cur.get(id), t = tgt.get(id);
+    return c !== undefined && t !== undefined && nameOf(c) !== undefined && nameOf(c) !== nameOf(t);
+  };
+  // The variable that takes over the old name of `id` (if it is another one that is renamed as well).
+  const successor = (id: string): string | undefined => {
+    const next = holderOfTarget.get(nameOf(cur.get(id)!)!);
+    return next !== undefined && next !== id && renamed(next) ? next : undefined;
+  };
+  const actions: Action[] = [];
+  const seen = new Set<string>();
+  for (const start of [...cur.keys()].filter(renamed).sort()) {
+    if (seen.has(start)) continue;
+    const path: string[] = [];
+    let id: string | undefined = start;
+    while (id !== undefined && !seen.has(id) && !path.includes(id)) { path.push(id); id = successor(id); }
+    path.forEach(p => seen.add(p));
+    if (id === undefined || seen.has(id) && !path.includes(id)) continue; // a chain or an already handled cycle
+    const cycle = path.slice(path.indexOf(id));
+    const pick = [...cycle].sort()[0];
+    const payload = { ...(cur.get(pick) as GenericProps), qName: `${nameOf(cur.get(pick)!)}__qommit_${pick}` };
+    actions.push({ op: "upsert", group: "variables", id: pick, exists: true, payload, temporary: true });
+  }
+  return actions.sort((a, b) => (a as { id: string }).id < (b as { id: string }).id ? -1 : 1);
+}
+
+/**
+ * Orders variable upserts so that no write produces a duplicate name: an upsert that takes a name
+ * runs after the upsert that moves its current holder away (ties by id). Holders that went to a
+ * temporary name have already released theirs.
+ */
+function orderByNameDependency<T extends { id: string; payload: Payload }>(upserts: T[], cur: Map<string, Payload>, released: Set<string>): T[] {
+  const holderOfName = new Map<string, string>(); // current name -> id
+  for (const [id, p] of cur) { const n = nameOf(p); if (n !== undefined) holderOfName.set(n, id); }
+  const byIdMap = new Map(upserts.map(u => [u.id, u]));
+  const out: T[] = [];
+  const state = new Map<string, "visiting" | "done">();
+  const visit = (u: T): void => {
+    if (state.has(u.id)) return;
+    state.set(u.id, "visiting");
+    const name = nameOf(u.payload);
+    const holder = name === undefined ? undefined : holderOfName.get(name);
+    if (holder !== undefined && holder !== u.id && !released.has(holder)) {
+      const dep = byIdMap.get(holder);
+      if (dep) visit(dep);
+    }
+    state.set(u.id, "done");
+    out.push(u);
+  };
+  upserts.forEach(visit);
+  return out;
+}
+
 export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: ReadonlySet<Part>): Action[] {
   const upserts: Action[] = [];
   const deletes: Action[] = [];
@@ -67,6 +128,9 @@ export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: Rea
       groupDeletes.sort(byId);
 
       if (group === "variables") {
+        const temps = temporaryRenames(cur, tgt);
+        upserts.push(...temps);
+        const ordered = orderByNameDependency(groupUpserts, cur, new Set(temps.map(t => (t as { id: string }).id)));
         // A deleted variable must free its name immediately before another variable takes it.
         const freed = new Map<string, Action[]>();
         for (const d of groupDeletes) {
@@ -74,7 +138,7 @@ export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: Rea
           if (name !== undefined) freed.set(name, [...(freed.get(name) ?? []), d]);
         }
         const early = new Set<Action>();
-        for (const u of groupUpserts) {
+        for (const u of ordered) {
           const name = nameOf(u.payload);
           const blockers = name === undefined ? undefined : freed.get(name);
           if (blockers) { upserts.push(...blockers); blockers.forEach(b => early.add(b)); freed.delete(name!); }
@@ -111,9 +175,34 @@ export function planUpdate(current: AppSnapshot, target: AppSnapshot, parts: Rea
 export function summarize(actions: Action[]): PlanSummary {
   const s: PlanSummary = { create: 0, change: 0, delete: 0 };
   for (const a of actions) {
+    if (a.op === "upsert" && a.temporary) continue;
     if (a.op === "delete" || a.op === "deleteFile") s.delete++;
     else if (a.op === "setScript" || a.exists) s.change++;
     else s.create++;
   }
   return s;
+}
+
+export interface ActionItem {
+  kind: "create" | "change" | "delete";
+  group: AppObjectGroup | "files" | "script";
+  id: string;
+  title: string;
+}
+
+/** A human-readable view of one action: what is touched and how it is called. */
+export function describeAction(a: Action): ActionItem {
+  switch (a.op) {
+    case "setScript": return { kind: "change", group: "script", id: "script", title: "Load script" };
+    case "deleteFile": return { kind: "delete", group: "files", id: a.name, title: a.name };
+    case "putFile": return { kind: a.exists ? "change" : "create", group: "files", id: a.name, title: a.name };
+    case "delete": return { kind: "delete", group: a.group, id: a.id, title: a.id };
+    case "upsert": {
+      const props = isTree(a.payload) ? a.payload.qProperty : a.payload;
+      const metaDef = props.qMetaDef as { title?: unknown } | undefined;
+      const title = typeof metaDef?.title === "string" && metaDef.title !== "" ? metaDef.title
+        : typeof props.qName === "string" && props.qName !== "" ? props.qName : a.id;
+      return { kind: a.exists ? "change" : "create", group: a.group, id: a.id, title };
+    }
+  }
 }

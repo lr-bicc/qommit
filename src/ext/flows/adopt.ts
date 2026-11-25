@@ -1,36 +1,13 @@
-import { replaceAppContentIds } from "../../core/app-content-ids";
 import { groupOf } from "../../core/diff";
 import { gitBlobSha } from "../../core/git-hash";
 import type { FileMap } from "../../core/types";
 import { GatewayError, type GitHubPort } from "../shared/github-port";
+import { comparable, isScriptCreated } from "./gitoqlok-format";
 import { buildLocalFiles } from "./local-changes";
 import { sameMaintainedTree, type FlowPorts } from "./ports";
 
 /** Above this many files that need a download to compare, the check gives up and answers "not contained". */
 export const MAX_COMPARED_DOWNLOADS = 50;
-
-const NEUTRAL_ID = "00000000-0000-4000-8000-000000000000";
-
-/** The content an app would write: app ids in appcontent urls aligned, gitoqlok's engine stamps in value colours dropped. */
-function comparable(text: string): string | null {
-  try {
-    const value = JSON.parse(replaceAppContentIds(text, NEUTRAL_ID)) as Record<string, unknown>;
-    const colorMap = value?._ColorMapModel;
-    if (colorMap && typeof colorMap === "object") delete (colorMap as Record<string, unknown>).qMeta;
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
-}
-
-function isScriptCreated(text: string | null): boolean {
-  if (text === null) return false;
-  try {
-    return (JSON.parse(text) as { qIsScriptCreated?: unknown }).qIsScriptCreated === true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * True when the app already holds the head's version of every maintained file that changed between `base` and `head`,

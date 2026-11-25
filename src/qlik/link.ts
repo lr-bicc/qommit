@@ -78,7 +78,7 @@ export async function readGitoqlokMeta(doc: EngineApi): Promise<{ repo: string |
   return { repo: findRepo(data), lastCommitId: isNonEmpty(last) ? last : null };
 }
 
-export async function readAppInfo(doc: EngineApi): Promise<{ title: string; published: boolean }> {
+export async function readAppInfo(doc: EngineApi): Promise<{ title: string; published: boolean; canWrite: boolean }> {
   const layout = await call(doc.getAppLayout());
-  return { title: String(layout?.qTitle ?? ""), published: layout?.published === true };
+  return { title: String(layout?.qTitle ?? ""), published: layout?.published === true, canWrite: layout?.permissions?.update !== false };
 }

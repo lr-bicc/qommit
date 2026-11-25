@@ -1,3 +1,4 @@
+import type { GatewayRequest } from "../../src/ext/shared/github-port";
 import { handleGateway } from "../../src/ext/background/gateway";
 import { createGitHubPort, GatewayError } from "../../src/ext/shared/github-port";
 import { mockFetch } from "../github/mock-fetch";
@@ -187,4 +188,43 @@ test("markRepo sets the fixed qommit topic, only for repositories of the organis
   expect(m.calls.find((c) => c.method === "PUT")!.body).toEqual({ names: ["qommit"] });
   await expect(port.markRepo("other-org/app")).rejects.toMatchObject({ kind: "not-allowed" });
   expect(m.calls.filter((c) => c.url.includes("other-org")).length).toBe(0);
+});
+
+test("readBlobs travels as wire content and comes back as a FileMap", async () => {
+  const R = "/repos/lr-bicc/sales/git/blobs";
+  const a = "a".repeat(40);
+  const b = "b".repeat(40);
+  const { port } = setup({
+    [`GET ${R}/${a}`]: () => ({ body: { content: btoa("{}") } }),
+    [`GET ${R}/${b}`]: () => ({ body: { content: btoa("\x00\xff\x10") } }),
+  });
+  const files = await port.readBlobs("lr-bicc/sales", [{ path: "objects/a.json", sha: a }, { path: "appcontent/x.bin", sha: b }]);
+  expect(files).toBeInstanceOf(Map);
+  expect(files.get("objects/a.json")).toBe("{}");
+  expect(files.get("appcontent/x.bin")).toEqual(new Uint8Array([0, 255, 16]));
+});
+
+test("tags are listed and created through the gateway", async () => {
+  const R = "/repos/lr-bicc/sales";
+  const { m, port } = setup({
+    [`POST ${R}/git/tags`]: () => ({ status: 201, body: { sha: "t1" } }),
+    [`POST ${R}/git/refs`]: () => ({ status: 201, body: {} }),
+  });
+  await port.createTag("lr-bicc/sales", { name: "v1", sha: "a".repeat(40), message: "first" });
+  expect(m.calls.some((c) => c.url.includes("/git/tags"))).toBe(true);
+});
+
+test.each([
+  ["readBlobs", ["lr-bicc/sales", [{ path: "../x", sha: "a".repeat(40) }]]],
+  ["readBlobs", ["lr-bicc/sales", [{ path: "objects/a.json", sha: "xyz" }]]],
+  ["readBlobs", ["lr-bicc/sales", []]],
+  ["readBlobs", ["lr-bicc/sales", Array.from({ length: 101 }, () => ({ path: "a", sha: "a".repeat(40) }))]],
+  ["createTag", ["lr-bicc/sales", { name: "bad name", sha: "a".repeat(40), message: "" }]],
+  ["createTag", ["lr-bicc/sales", { name: "v1", sha: "nope", message: "" }]],
+  ["createTag", ["lr-bicc/sales", { name: "v1", sha: "a".repeat(40) }]],
+  ["listTags", ["other-org/sales"]],
+])("%s refuses malformed arguments", async (op, args) => {
+  const { deps, m } = setup();
+  expect(await handleGateway({ op, args } as GatewayRequest, deps)).toMatchObject({ ok: false, error: { kind: "not-allowed" } });
+  expect(m.calls.length).toBe(0);
 });

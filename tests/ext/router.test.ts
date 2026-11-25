@@ -9,7 +9,8 @@ import { QlikSessionError, type EngineSession } from "../../src/qlik/session";
 import { QlikTimeoutError } from "../../src/qlik/timeout";
 import { APP_ID, makeSnapshot } from "../fixtures/snapshot";
 import { appFromSnapshot, fakeDoc } from "../qlik/fake-engine";
-import { fakeCache, fakeGitHub } from "./fake-ports";
+import type { DiffSource } from "../../src/ext/flows/diff";
+import { fakeCache, fakeGitHub, fakeServer, memoryJournal } from "./fake-ports";
 
 const appPage = (id: string) => `https://qlik.example.com/qs/sense/app/${id}/overview`;
 const OTHER_ID = "33333333-3333-4333-8333-333333333333";
@@ -33,6 +34,11 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
     patch: {} as Record<string, (...args: unknown[]) => Promise<unknown>>,
   };
   const events: ProgressEvent[] = [];
+  const journal = memoryJournal();
+  const server = fakeServer();
+  const serverLocs: unknown[] = [];
+  const diffs: { source: DiffSource; opts: { select?: string; title: string } }[] = [];
+  const closes: number[] = [];
   let clock = 0;
   const router = createRouter({
     currentUrl: () => url,
@@ -64,9 +70,13 @@ function setup(init: { url?: string; linked?: boolean; linkBranch?: string; publ
     fetch: (async () => new Response(new Uint8Array([137, 80, 78, 71]))) as typeof fetch,
     now: init.now ?? (() => new Date(clock += 1000)),
     emit: (e) => { events.push(e); return init.emit?.(e) as void; },
+    journal,
+    server: (loc) => { serverLocs.push(loc); return server; },
+    showDiff: (source, opts) => { diffs.push({ source, opts }); },
+    closeDiff: () => { closes.push(diffs.length); return diffs.length > 0; },
   });
   return {
-    run: router, sessions, events, github, cache, app,
+    run: router, sessions, events, github, cache, app, journal, server, serverLocs, diffs, closes,
     setUrl: (u: string) => { url = u; },
     failNextRead: () => { sessions.failNext = true; },
   };
@@ -82,7 +92,7 @@ test("hub pages have no app", async () => {
   const { run } = setup({ url: "https://qlik.example.com/qs/hub" });
   expect(await run({ cmd: "status" })).toEqual({ ok: true, value: { page: "hub" } });
   expect(await run({ cmd: "localChanges" })).toMatchObject({ ok: false, error: { code: "no-app" } });
-  expect(await run({ cmd: "listRepos" })).toMatchObject({ ok: false, error: { code: "no-app" } });
+  expect(await run({ cmd: "listRepos" })).toMatchObject({ ok: true });
   expect(await run({ cmd: "ping" })).toEqual({ ok: true, value: "pong" });
 });
 
@@ -220,6 +230,25 @@ test("history lists the commits of the linked branch", async () => {
   const res = (await run({ cmd: "history", page: 1 })) as any;
   expect(res.value.defaultBranch).toBe("main");
   expect(res.value.commits.map((c: any) => c.message)).toEqual(["Initial commit"]);
+});
+
+test("history lists the commits for a published app, too", async () => {
+  const { run } = setup({ linked: true, published: true });
+  expect(((await run({ cmd: "status" })) as any).value.status.state).toBe("published");
+  const res = (await run({ cmd: "history", page: 1 })) as any;
+  expect(res.ok).toBe(true);
+  expect(res.value.defaultBranch).toBe("main");
+  expect(res.value.commits.map((c: any) => c.message)).toEqual(["Initial commit"]);
+});
+
+test("status still answers when the journal cannot be read", async () => {
+  const { run, journal } = setup({ linked: true });
+  journal.get = async () => { throw new Error("storage unavailable"); };
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const res = (await run({ cmd: "status" })) as any;
+  expect(res.ok).toBe(true);
+  expect(res.value.interruptedUpdate).toBeNull();
+  warn.mockRestore();
 });
 
 test("history needs a linked app", async () => {
@@ -401,4 +430,131 @@ test("a mutating command for another app is app-changed: no session, nothing wri
   }
   expect(sessions.opened).toBe(0);
   expect(await run({ ...COMMIT, appId: APP_ID.toUpperCase(), paths: ["objects/dimensions/d-new.json"] })).toMatchObject({ ok: true });
+});
+
+const titleOf = (app: { dimensions: any[] }): string => app.dimensions[0].qMetaDef.title;
+const DIM_PATH = "objects/dimensions/dim-1.json";
+
+/** A commit on main that retitles the dimension; returns its sha. */
+async function retitleDimension(github: ReturnType<typeof fakeGitHub>): Promise<string> {
+  const files = github.filesAt(REPO, github.head(REPO, "main"));
+  const dim = JSON.parse(files.get(DIM_PATH) as string);
+  dim.qMetaDef.title = "Nation";
+  return github.commitFiles(REPO, {
+    branch: "main", parentSha: github.head(REPO, "main"), message: "retitle",
+    changes: [{ path: DIM_PATH, content: JSON.stringify(dim, null, 2) + "\n" }],
+  });
+}
+
+test("commits, tags and import work on the hub", async () => {
+  const { run, github, sessions, serverLocs } = setup({ url: "https://qlik.example.com/qs/hub/my/work" });
+  const snap = makeSnapshot();
+  snap.bookmarks = []; // bookmarks are never written, so an import must not expect them
+  const files = serializeApp(snap, { canonicalAppId: APP_ID });
+  files.set("README.md", createReadme({ appTitle: "Sales", creatorLogin: "x", createdAt: new Date(0), sheets: [],
+    defaultBranch: "main", appUrl: `https://qlik.example.com/qs/sense/app/${APP_ID}` }));
+  const sha = github.seed(REPO, files);
+  github.tag(REPO, "v1", sha, "first");
+  const commits = (await run({ cmd: "commits", repo: REPO, branch: "main", page: 1 })) as any;
+  expect(commits.value.map((c: any) => c.sha)).toEqual([sha]);
+  expect(await run({ cmd: "tags", repo: REPO })).toMatchObject({ ok: true, value: [{ name: "v1", sha }] });
+  expect(await run({ cmd: "addTag", repo: REPO, sha, name: "v2", message: "second" })).toEqual({ ok: true, value: null });
+  expect(((await run({ cmd: "tags", repo: REPO })) as any).value.map((t: any) => t.name).sort()).toEqual(["v1", "v2"]);
+  const imported = (await run({ cmd: "importApp", repo: REPO, sha, label: "v1" })) as any;
+  expect(imported).toMatchObject({ ok: true, value: { name: "Sales (v1)" } });
+  // the location has the page's origin and virtual proxy, but no app
+  expect(serverLocs).toEqual([{ origin: "https://qlik.example.com", prefix: "/qs", appId: null }]);
+  expect(sessions.opened).toBe(0);
+  // commands that need the app are refused
+  expect(await run({ cmd: "updatePreview", appId: APP_ID, target: sha, parts: ["script"] })).toMatchObject({ ok: false, error: { code: "no-app" } });
+  expect(await run({ cmd: "update", appId: APP_ID, target: sha, parts: ["script"] })).toMatchObject({ ok: false, error: { code: "no-app" } });
+});
+
+test("import is refused on a page that is not Qlik", async () => {
+  const { run, serverLocs } = setup({ url: "https://example.com/" });
+  expect(await run({ cmd: "importApp", repo: REPO, sha: "x", label: "v1" })).toMatchObject({ ok: false, error: { code: "no-app" } });
+  expect(serverLocs).toEqual([]);
+});
+
+test("status reports an interrupted update", async () => {
+  const { run, journal } = setup({ linked: true });
+  expect(((await run({ cmd: "status" })) as any).value.interruptedUpdate).toBeNull();
+  const entry = { appId: APP_ID, repo: REPO, branch: "main", target: "abc", backupBranch: "backup/main-1", total: 3, startedAt: "2026-01-01T00:00:00.000Z" };
+  await journal.set(entry);
+  expect(((await run({ cmd: "status" })) as any).value).toMatchObject({ interruptedUpdate: entry });
+});
+
+test("update preview writes nothing; update applies, clears the journal and forgets the status", async () => {
+  const { run, github, app, journal, events } = setup({ linked: true });
+  const head = await retitleDimension(github);
+  const before = ((await run({ cmd: "status" })) as any).value.status;
+  expect(before.behindBy).toBe(1);
+
+  const preview = (await run({ cmd: "updatePreview", appId: APP_ID, target: head, parts: ["objects"] })) as any;
+  expect(preview).toMatchObject({ ok: true, value: { target: head, summary: { create: 0, change: 1, delete: 0 }, onBranch: true } });
+  expect(titleOf(app)).toBe("Country");
+
+  const result = (await run({ cmd: "update", appId: APP_ID, target: head, parts: ["objects"] })) as any;
+  expect(result).toMatchObject({ ok: true, value: { syncedSha: head, backupBranch: null, applied: 1 } });
+  expect(titleOf(app)).toBe("Nation");
+  expect(journal.entries.size).toBe(0);
+  expect(events.some((e) => e.text.startsWith("Updating app"))).toBe(true);
+  const after = ((await run({ cmd: "status" })) as any).value.status;
+  expect(after.link.syncedSha).toBe(head);
+});
+
+test("update needs a linked app", async () => {
+  const { run } = setup();
+  expect(await run({ cmd: "updatePreview", appId: APP_ID, target: "x", parts: ["script"] })).toMatchObject({ ok: false, error: { code: "not-linked" } });
+  expect(await run({ cmd: "update", appId: APP_ID, target: "x", parts: ["script"] })).toMatchObject({ ok: false, error: { code: "not-linked" } });
+});
+
+test("update refuses a command for another app", async () => {
+  const { run, github, app, journal, sessions } = setup({ linked: true });
+  const head = await retitleDimension(github);
+  const dimensions = JSON.stringify(app.dimensions);
+  const script = JSON.stringify(app.script);
+  const branchHead = github.head(REPO, "main");
+  for (const cmd of ["updatePreview", "update"] as const) {
+    expect(await run({ cmd, appId: OTHER_ID, target: head, parts: ["objects"] })).toMatchObject({ ok: false, error: { code: "app-changed" } });
+  }
+  expect(sessions.opened).toBe(0);
+  expect(JSON.stringify(app.dimensions)).toBe(dimensions);
+  expect(JSON.stringify(app.script)).toBe(script);
+  expect(titleOf(app)).toBe("Country");
+  expect(journal.entries.size).toBe(0);
+  expect(github.head(REPO, "main")).toBe(branchHead);
+});
+
+test("showDiff between commits works on the hub; the overlay gets the source, the path and the title", async () => {
+  const { run, github, diffs, sessions } = setup({ url: "https://qlik.example.com/qs/hub", linked: true });
+  const base = github.head(REPO, "main");
+  const head = await retitleDimension(github);
+  const res = await run({ cmd: "showDiff", repo: REPO, before: { kind: "commit", sha: base }, after: { kind: "commit", sha: head }, select: DIM_PATH, title: "Diff" });
+  expect(res).toEqual({ ok: true, value: null });
+  expect(diffs).toHaveLength(1);
+  expect(diffs[0]!.opts).toEqual({ select: DIM_PATH, title: "Diff" });
+  expect(diffs[0]!.source.repo).toBe(REPO);
+  expect(diffs[0]!.source.entries.map((e) => e.path)).toEqual([DIM_PATH]);
+  expect(sessions.opened).toBe(0);
+});
+
+test("closeDiff closes the overlay on any page without opening an engine session", async () => {
+  const { run, closes, sessions } = setup({ url: "https://qlik.example.com/qs/hub", linked: true });
+  expect(await run({ cmd: "closeDiff" })).toEqual({ ok: true, value: false });
+  expect(closes).toEqual([0]);
+  expect(sessions.opened).toBe(0);
+});
+
+test("showDiff against the app needs the app", async () => {
+  const hub = setup({ url: "https://qlik.example.com/qs/hub", linked: true });
+  const res = await hub.run({ cmd: "showDiff", repo: REPO, before: { kind: "commit", sha: "abc" }, after: { kind: "app" }, title: "Diff" });
+  expect(res).toMatchObject({ ok: false, error: { code: "no-app" } });
+  expect(hub.diffs).toHaveLength(0);
+
+  const onApp = setup({ linked: true });
+  const head = onApp.github.head(REPO, "main");
+  const ok = await onApp.run({ cmd: "showDiff", repo: REPO, before: { kind: "commit", sha: head }, after: { kind: "app" }, title: "Local" });
+  expect(ok).toEqual({ ok: true, value: null });
+  expect(onApp.diffs).toHaveLength(1);
 });

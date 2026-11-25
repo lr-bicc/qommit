@@ -7,6 +7,8 @@ const TABLE_SEPARATOR = "---|---";
 const HEADER_RE = /^\s*Branch Name\s*\|\s*Qlik application\s*$/;
 const SEPARATOR_RE = /^\s*-+\s*\|\s*-+\s*$/;
 const LINK_RE = /^\s*\[[^\]]*\]\(([^)\s]+)\)\s*$/;
+// Branch cell up to the first pipe that is not escaped as "\|".
+const FIRST_CELL_RE = /^((?:[^|\\]|\\.)*)\|/;
 const APP_ID_RE = /\/app\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
 function normalizeSlug(text: string): string {
@@ -59,9 +61,10 @@ function findTableStart(lines: Line[]): number {
 
 /** Parses a table row; null when the second cell is not a markdown link. */
 function parseRow(line: string): BranchRow | null {
-  const pipe = line.indexOf("|");
-  const branch = line.slice(0, pipe).trim();
-  const link = LINK_RE.exec(line.slice(pipe + 1));
+  const cells = FIRST_CELL_RE.exec(line);
+  if (!cells) return null;
+  const branch = cells[1].replace(/\\\|/g, "|").trim();
+  const link = LINK_RE.exec(line.slice(cells[0].length));
   if (!branch || !link) return null;
   const appUrl = link[1];
   const id = APP_ID_RE.exec(appUrl);
@@ -89,8 +92,22 @@ export function parseBranchTable(readme: string): BranchRow[] {
   return [...byBranch.values()];
 }
 
+const escapeCell = (text: string): string => text.replace(/\r\n|\r|\n/g, " ").replace(/\|/g, "\\|");
+const encodeUrl = (url: string): string => url.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
+
 function formatRow(branch: string, appUrl: string): string {
-  return `${branch}|[${appUrl}](${appUrl})`;
+  const url = encodeUrl(appUrl);
+  return `${escapeCell(branch)}|[${url}](${url})`;
+}
+
+/** The app title of a repository README: the first `# <title>` line that is not the fixed repository heading. */
+export function readmeTitle(readme: string): string | null {
+  for (const line of readme.split(/\r?\n/)) {
+    const m = /^# (.*)$/.exec(line);
+    const title = m?.[1].trim();
+    if (title && title !== "Qlik Application Repository") return title;
+  }
+  return null;
 }
 
 export function upsertBranchRow(readme: string, row: { branch: string; appUrl: string }): string {
@@ -153,7 +170,7 @@ export function createReadme(input: {
     "",
     "Sheet Title | Description",
     "------------ | -------------",
-    ...input.sheets.map(s => `${s.title}|${s.description}`),
+    ...input.sheets.map(s => `${escapeCell(s.title)}|${escapeCell(s.description)}`),
     "",
     "",
     TABLE_HEADER,

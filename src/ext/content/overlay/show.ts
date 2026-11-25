@@ -1,0 +1,39 @@
+import { h, render } from "preact";
+import type { DiffSource } from "../../flows/diff";
+import { DiffOverlay } from "./DiffOverlay";
+
+let closeCurrent: (() => void) | null = null;
+/** "Maximize" holds for the overlays this page opens later, until the page is loaded again. */
+let maximized = false;
+
+/** Closes the open overlay, as "Close" does; true when one was open. */
+export function closeDiffOverlay(): boolean {
+  if (closeCurrent === null) return false;
+  closeCurrent();
+  return true;
+}
+
+/** Shows the differences full screen over the Qlik page; a second call replaces the overlay that is open. */
+export function showDiffOverlay(source: DiffSource, opts: { select?: string; title: string }): void {
+  closeCurrent?.();
+  const host = document.createElement("div");
+  host.id = "qommit-diff";
+  const shadow = host.attachShadow({ mode: "open" });
+  document.body.appendChild(host);
+
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") close();
+  };
+  const close = (): void => {
+    document.removeEventListener("keydown", onKey, true);
+    render(null, shadow);
+    host.remove();
+    if (closeCurrent === close) closeCurrent = null;
+  };
+  closeCurrent = close;
+  document.addEventListener("keydown", onKey, true);
+  render(h(DiffOverlay, {
+    source, select: opts.select, title: opts.title, onClose: close,
+    maximized, onMaximize: (value: boolean) => { maximized = value; },
+  }), shadow);
+}

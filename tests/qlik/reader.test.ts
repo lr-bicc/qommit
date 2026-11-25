@@ -1,3 +1,5 @@
+import { withoutSnapshotIdentity } from "../../src/core/embedded-snapshots";
+import { storyWithSnapshot } from "../fixtures/story-snapshot";
 import { serializeApp } from "../../src/core/serializer";
 import { QlikReadError, readApp } from "../../src/qlik/reader";
 import { QlikTimeoutError } from "../../src/qlik/timeout";
@@ -271,4 +273,11 @@ describe("the variable list definition", () => {
     const snap = await read(app);
     expect(snap.variables[0]).toMatchObject({ qIsReserved: true });
   });
+});
+
+test("embedded snapshots are read without their id and the selections they were taken with", async () => {
+  const snap = makeSnapshot();
+  snap.stories = [storyWithSnapshot()];
+  const read = await readApp(fakeDoc(appFromSnapshot(snap)).doc, APP_ID, { published: false });
+  expect(read.stories).toEqual([withoutSnapshotIdentity(storyWithSnapshot())]);
 });
