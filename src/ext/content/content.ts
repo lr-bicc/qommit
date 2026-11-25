@@ -73,7 +73,9 @@ function start(): void {
 
   // "Maximize" shows the diff in its own window; the service worker opens it.
   setDiffWindowOpener(async (id) => {
-    const open: OpenDiffWindow = { target: "diffWindow", id };
+    const s = screen as Screen & { availLeft?: number; availTop?: number };
+    const area = { left: s.availLeft ?? 0, top: s.availTop ?? 0, width: s.availWidth, height: s.availHeight };
+    const open: OpenDiffWindow = { target: "diffWindow", id, area };
     const result = (await chrome.runtime.sendMessage(open)) as CommandResult | undefined;
     if (!result?.ok) throw new Error(result && !result.ok ? result.error.message : "No answer from the service worker");
   });

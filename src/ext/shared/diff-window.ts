@@ -7,8 +7,14 @@ import type { WireContent } from "./wire";
  * it is closed.
  */
 
-/** Content script → service worker: show the diff `id` in the window of the sender's tab. */
-export interface OpenDiffWindow { target: "diffWindow"; id: string }
+/** The part of the screen windows can use (without the taskbar), in screen pixels. */
+export interface ScreenArea { left: number; top: number; width: number; height: number }
+
+/**
+ * Content script → service worker: show the diff `id` in the window of the sender's tab. `area` is the screen of the
+ * Qlik tab; a new window gets its normal size from it (the worker has no `screen`).
+ */
+export interface OpenDiffWindow { target: "diffWindow"; id: string; area?: ScreenArea }
 
 /** Window → content script of its Qlik tab, and service worker → content script ("closed"). */
 export type DiffWindowRequest =

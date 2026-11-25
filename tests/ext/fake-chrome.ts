@@ -22,7 +22,7 @@ export interface FakeChrome {
   sent: unknown[]; // chrome.runtime.sendMessage payloads
   respond: (message: any) => unknown; // answer for runtime.sendMessage / tabs.sendMessage
   tabs: { id?: number; url?: string; active?: boolean; windowId?: number }[]; // result of chrome.tabs.query
-  windows: { id: number; url: string; type?: string; state?: string; focused?: boolean }[]; // open windows (chrome.windows.create)
+  windows: { id: number; url: string; type?: string; state?: string; focused?: boolean; left?: number; top?: number; width?: number; height?: number }[]; // open windows
   tabMessages: { tabId: number; message: unknown }[];
   injected: { tabId: number; files: string[] }[]; // chrome.scripting.executeScript calls
   panelOptions: unknown[]; // chrome.sidePanel.setOptions calls
@@ -180,16 +180,17 @@ export function installFakeChrome(): FakeChrome {
       },
     },
     windows: {
-      async create(data: { url: string; type?: string; state?: string }) {
+      async create(data: { url: string; type?: string; state?: string; left?: number; top?: number; width?: number; height?: number }) {
         const id = nextWindowId++;
-        fake.windows.push({ id, url: data.url, type: data.type, state: data.state, focused: true });
+        fake.windows.push({ id, ...data, state: data.state ?? "normal", focused: true });
         fake.tabs.push({ id: 1000 + id, url: data.url, windowId: id });
         return { id };
       },
-      async update(windowId: number, info: { focused?: boolean }) {
+      async update(windowId: number, info: { focused?: boolean; state?: string }) {
         const win = fake.windows.find((w) => w.id === windowId);
         if (!win) throw new Error(`No window with id: ${windowId}.`);
         if (info.focused !== undefined) win.focused = info.focused;
+        if (info.state !== undefined) win.state = info.state;
         return clone(win);
       },
       async remove(windowId: number) {

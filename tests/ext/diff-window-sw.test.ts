@@ -11,6 +11,15 @@ test("the first diff of a Qlik tab opens a maximized pop-up window", async () =>
   expect(fake.session["diffWindow:7"]).toBe(1);
 });
 
+test("with the screen of the Qlik tab, a new window gets 80 % of it as its normal size and is maximized after", async () => {
+  const fake = installFakeChrome();
+  await openDiffWindow(7, "a", { left: -1920, top: 0, width: 1920, height: 1040 });
+  expect(fake.windows).toEqual([{
+    id: 1, url: urlOf(7, "a"), type: "popup", state: "maximized", focused: true,
+    left: -1920 + 192, top: 104, width: 1536, height: 832,
+  }]);
+});
+
 test("further diffs of the tab reuse its window, where the user put it", async () => {
   const fake = installFakeChrome();
   await openDiffWindow(7, "a");
@@ -65,7 +74,8 @@ test("only Qommit's own content scripts can open a window", async () => {
   const answers: unknown[] = [];
   fake.emitMessage({ target: "diffWindow", id: "a" }, { id: "other-extension", tab: { id: 7 } }, (r) => answers.push(r));
   fake.emitMessage({ target: "diffWindow", id: "a" }, { id: "qommit-test" }, (r) => answers.push(r));
-  fake.emitMessage({ target: "diffWindow", id: "a" }, { id: "qommit-test", tab: { id: 7 } }, (r) => answers.push(r));
+  fake.emitMessage({ target: "diffWindow", id: "a", area: { left: 0, top: 0, width: 1000, height: 500 } }, { id: "qommit-test", tab: { id: 7 } }, (r) => answers.push(r));
+  await flush();
   await flush();
   await flush();
   expect(answers).toEqual([
@@ -73,5 +83,7 @@ test("only Qommit's own content scripts can open a window", async () => {
     { ok: false, error: expect.objectContaining({ code: "not-allowed" }) },
     { ok: true, value: null },
   ]);
-  expect(fake.windows.map((w) => w.url)).toEqual([urlOf(7, "a")]);
+  expect(fake.windows).toEqual([{
+    id: 1, url: urlOf(7, "a"), type: "popup", state: "maximized", focused: true, left: 100, top: 50, width: 800, height: 400,
+  }]);
 });
