@@ -1,9 +1,10 @@
 import { deserializeApp } from "../../core/deserializer";
-import { diffTrees, type Part } from "../../core/diff";
+import { diffTrees, type Part, type TreeChange } from "../../core/diff";
 import { validateTarget, variableNameConflicts } from "../../core/target-validator";
 import type { AppSnapshot, FileMap } from "../../core/types";
 import { describeAction, planUpdate, summarize, type Action, type ActionItem, type PlanSummary } from "../../core/update-planner";
 import type { LinkData } from "../../qlik/link";
+import { withoutGitoqlokFormat } from "./gitoqlok-format";
 import { readLocal } from "./local-changes";
 import { GatewayError } from "../shared/github-port";
 import type { FileChange } from "../../github/repo";
@@ -29,6 +30,8 @@ export interface PreparedUpdate {
   info: AppInfo;
   local: { snapshot: AppSnapshot; files: FileMap; hashes: Map<string, string> };
   baseTree: Map<string, string>;
+  /** The local changes against `syncedSha`, without gitoqlok's format. */
+  localDiff: TreeChange[];
   actions: Action[];
   preview: UpdatePreview;
 }
@@ -53,14 +56,15 @@ export async function prepareUpdate(ports: FlowPorts, input: UpdateInput, onProg
   if (conflicts.length > 0) throw new FlowError("invalid-target", "The selected state is not a valid app state", conflicts);
 
   const actions = planUpdate(current, targetSnap, new Set<Part>(parts));
-  const localChanges = diffTrees(baseTree, local.hashes).length;
+  const { changes: localDiff } = await withoutGitoqlokFormat(ports.github, link.repo, baseTree, local.files, diffTrees(baseTree, local.hashes));
+  const localChanges = localDiff.length;
   const head = await ports.github.getBranchSha(link.repo, link.branch);
   if (head === null) throw new FlowError("branch-not-found", `Branch ${link.branch} was not found`);
   const onBranch = await isAncestor(ports.github, link.repo, target, head);
 
   const items = actions.filter((a) => !(a.op === "upsert" && a.temporary)).map(describeAction);
   const advances = actions.length === 0 && onBranch && target !== link.syncedSha;
-  return { info, local, baseTree, actions, preview: { target, items, summary: summarize(actions), localChanges, onBranch, advances } };
+  return { info, local, baseTree, localDiff, actions, preview: { target, items, summary: summarize(actions), localChanges, onBranch, advances } };
 }
 
 export async function previewUpdate(ports: FlowPorts, input: UpdateInput, onProgress?: Progress): Promise<UpdatePreview> {
@@ -80,8 +84,8 @@ export function backupBranchName(branch: string, at: Date): string {
 
 /** Saves the local state to a new backup branch; rethrows any failure, including 20 name collisions. */
 async function createBackup(ports: FlowPorts, prepared: PreparedUpdate, link: LinkData, target: string): Promise<string> {
-  const { local, baseTree } = prepared;
-  const changes: FileChange[] = diffTrees(baseTree, local.hashes).map((c) => ({
+  const { local, localDiff } = prepared;
+  const changes: FileChange[] = localDiff.map((c) => ({
     path: c.path, content: c.kind === "deleted" ? null : local.files.get(c.path)!,
   }));
   const baseName = backupBranchName(link.branch, ports.now());

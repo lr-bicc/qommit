@@ -202,16 +202,48 @@ export async function listTags(c: GitHubClient, repo: string): Promise<TagInfo[]
   }
 }
 
-/** Reads blobs by SHA (at most 8 at a time). Paths under `appcontent/` come back as bytes, all others as UTF-8 text with their BOM kept. */
+type BlobTextNode = { text: string | null; isTruncated: boolean; isBinary: boolean | null } | null;
+
+/** JSON files by GraphQL, all in one query; a file it does not return in full is missing from the result. */
+async function readJsonBlobs(c: GitHubClient, repo: string, items: BlobRef[]): Promise<FileMap> {
+  const [owner, name] = repo.split("/");
+  const vars = items.map((_, i) => `$o${i}: GitObjectID!`).join(", ");
+  const fields = items.map((_, i) => `b${i}: object(oid: $o${i}) { ... on Blob { text isTruncated isBinary } }`).join(" ");
+  const query = `query($owner: String!, $name: String!, ${vars}) { repository(owner: $owner, name: $name) { ${fields} } }`;
+  const variables: Record<string, string> = { owner: owner!, name: name! };
+  items.forEach(({ sha }, i) => { variables[`o${i}`] = sha; });
+  const data = await c.graphql<{ repository: Record<string, BlobTextNode> | null }>(query, variables);
+  const out: FileMap = new Map();
+  items.forEach(({ path }, i) => {
+    const node = data?.repository?.[`b${i}`];
+    if (node && typeof node.text === "string" && !node.isTruncated && node.isBinary !== true) out.set(path, node.text);
+  });
+  return out;
+}
+
+/**
+ * Reads blobs by SHA. JSON files come in one GraphQL query; the others, and any JSON file it does not return in full,
+ * one REST request each, at most 8 at a time. Paths under `appcontent/` come back as bytes, all others as UTF-8 text
+ * with their BOM kept.
+ */
 export async function readBlobs(c: GitHubClient, repo: string, items: BlobRef[]): Promise<FileMap> {
   if (items.length > MAX_BLOBS_PER_CALL) throw new Error("Too many blobs in one call");
-  const out: FileMap = new Map();
+  const json = items.filter((i) => i.path.endsWith(".json") && !i.path.startsWith("appcontent/"));
+  let out: FileMap = new Map();
+  if (json.length > 0) {
+    try {
+      out = await readJsonBlobs(c, repo, json);
+    } catch {
+      out = new Map(); // the REST requests below read them, or report the error
+    }
+  }
+  const rest = items.filter((i) => !out.has(i.path));
   const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
   let next = 0;
   let failed = false;
   async function worker(): Promise<void> {
-    while (!failed && next < items.length) {
-      const { path, sha } = items[next++];
+    while (!failed && next < rest.length) {
+      const { path, sha } = rest[next++];
       try {
         const res = await c.rest<{ content: string }>("GET", `/repos/${repo}/git/blobs/${sha}`);
         const bytes = Uint8Array.from(atob(res.content.replace(/\s/g, "")), (ch) => ch.charCodeAt(0));
@@ -222,7 +254,7 @@ export async function readBlobs(c: GitHubClient, repo: string, items: BlobRef[])
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_BLOB_READS, items.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_BLOB_READS, rest.length) }, worker));
   return out;
 }
 

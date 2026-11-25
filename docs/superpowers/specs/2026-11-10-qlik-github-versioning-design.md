@@ -1,8 +1,8 @@
 # Design: Qommit – Versionierungstool für Qlik Sense Apps (Chrome-Extension + GitHub)
 
 - **Name des Tools:** Qommit (Paket- und Repo-Name `qommit`, Repo `lr-bicc/qommit`)
-- **Datum:** 2026-11-23 (Revision 12)
-- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12), Revision 11 die Änderungen aus der Abnahme von Plan 2 (Abschnitt 13), Revision 12 die Änderungen aus der Umsetzung von Plan 3 (Abschnitt 14).
+- **Datum:** 2026-11-25 (Revision 13)
+- **Status:** Revision 8 freigegeben am 2026-11-11. Revision 9 enthält die Anpassungen nach dem Spike (Abschnitt 11), Revision 10 die Entscheidungen aus der Umsetzung von Plan 2 (Abschnitt 12), Revision 11 die Änderungen aus der Abnahme von Plan 2 (Abschnitt 13), Revision 12 die Änderungen aus der Umsetzung von Plan 3 (Abschnitt 14), Revision 13 die Änderungen aus der Abnahme von Plan 3 (Abschnitt 15).
 - **Vorbild:** gitoqlok – bewusst abgespeckt auf GitHub als einziges Backend
 - **Referenzen:** Repo `lr-bicc/supply-chain-performance` (von gitoqlok erzeugt) und vier Bildschirmaufnahmen der gitoqlok-Abläufe vom 2026-11-11 (Branch anlegen, Save changes, Update, Rundgang mit Connect-Dialog und Einstellungen) sowie ein gitoqlok-Log desselben Tages
 
@@ -140,7 +140,7 @@ appcontent/<Dateiname>            statische Dateien der App (Bilder)
 | `loadScript.qvs` (das zusammengefügte Gesamtskript) wird nicht geschrieben. | Jede Skriptänderung stünde sonst doppelt im Repo, und jeder Merge-Konflikt im Skript müsste zweimal gleich gelöst werden. gitoqlok bietet dasselbe als Einstellung an („Do not commit full loadScript.qvs file“). |
 | Commit-Nachrichten erhalten keinen Zusatz wie `[%_OBJECTS_%%_SCRIPT_%]`. | Der Zusatz ist für die Extension nicht nötig. |
 
-**Bestehende gitoqlok-Repos:** Der erste „Save changes“ mit der Extension entfernt einmalig die Dateien skripterzeugter Variablen, schreibt die normalisierten Datei-URLs und entfernt `qMeta` aus den Wertefarben. Für `supply-chain-performance` sind das 357 Variablen-Dateien, 11 Sheets und 2 Dimensionen (Spike). Liegen im Repo nicht mehr gepflegte Dateien (`loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json`, `builds/`), zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt); die Dateien bleiben in der Git-Historie erhalten.
+**Bestehende gitoqlok-Repos:** Das Format, in dem gitoqlok die Dateien geschrieben hat, gilt nicht als Unterschied zur App: Dateien skripterzeugter Variablen, eine andere App-ID in Datei-URLs und `qMeta` in den Wertefarben. Lokale Änderungen, „Diff to app“, die Vorschau eines Updates und Sicherungs-Branches zeigen deshalb nur echte Änderungen; zwischen zwei Commits bleibt das Format ein Unterschied. Eine Datei im alten Format wird erst neu geschrieben, wenn sich ihr Objekt ändert. Die Dateien skripterzeugter Variablen zählen wie `loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json` und `builds/` zu den nicht mehr gepflegten Dateien. Liegen solche im Repo, zeigt der Commit-Dialog die Option „Remove files no longer maintained“ (vorausgewählt), auch wenn es sonst keine lokalen Änderungen gibt; die Dateien bleiben in der Git-Historie erhalten. Für `supply-chain-performance` sind das 357 Variablen-Dateien und fünf weitere Dateien.
 
 ## 5. Verknüpfung App ↔ Repo ↔ Branch
 
@@ -359,3 +359,12 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 6.9 | Der App-Name stammt aus dem Titel der README, sonst aus dem Repo-Namen. | Der Repo-Name entsteht aus dem App-Namen, verliert aber Zeichen und Schreibweise. |
 | 10 | „Mehrdeutige Zuordnung einer App (eine App in zwei Branch-Tabellen) anzeigen“ ist ein offener Punkt. | Die Auflösung nimmt die erste Zuordnung; ein Hinweis auf weitere gehört nicht mehr in Plan 3. |
 | 6.6, 6.9 | Ein Update ohne Änderungen schließt ein unterbrochenes Update ab (Speichern, Journal leeren) und setzt `syncedSha` auf den Zielstand, wenn dieser auf dem Branch liegt; der Dialog bietet dann „Update“ statt „Close“. Scheitert „Import“ schon beim Anlegen der App, lautet die Meldung „The app could not be created.“ mit der Meldung der Engine. | Ein Update, das nur Dateien betrifft, die es nie schreibt, ließ „Repository has N new commits“ und den Hinweis auf ein unterbrochenes Update für immer stehen; „The new app was created“ war bei einer fehlgeschlagenen Anlage falsch. |
+
+## 15. Änderungen in Revision 13 (aus der Abnahme von Plan 3)
+
+| Abschnitt | Änderung | Anlass |
+|---|---|---|
+| 4.5, 6.5–6.7 | gitoqloks Format (skripterzeugte Variablen, fremde App-ID in Datei-URLs, `qMeta` in Wertefarben) ist kein Unterschied zwischen App und Repo. Die Dateien skripterzeugter Variablen entfernt die Option „Remove files no longer maintained“; der erste „Save changes“ schreibt das Format nicht mehr einmalig um. | Eine aus `main` importierte und verbundene „Supply Chain Performance“ zeigte 370 lokale Änderungen statt „No local changes“ (Erfolgskriterium 4); jedes Update über einem gitoqlok-Commit legte einen Sicherungs-Branch mit 370 Dateien an, und „Diff to app“ begann mit 357 gelöschten Variablen. |
+| 6.6 | Die Commit-Auswahl zeigt je Commit die ersten sieben Zeichen des SHA. | gitoqlok-Repos enthalten viele Commits mit gleicher Nachricht („Zwischen-Commit.“, „Update branches table“); nur das Datum unterschied sie. |
+| 6.6 | JSON-Dateien werden in einer GraphQL-Abfrage je 100 Dateien geladen, die übrigen einzeln. | Der Vergleich mit gitoqloks Format lädt beim ersten Öffnen bis zu 357 Variablen-Dateien. |
+| 6.7 | Escape im Panel schließt das Diff-Overlay ebenso wie Escape in der Seite. | Das Overlay liegt in der Qlik-Seite, der Fokus bleibt nach dem Klick im Panel; Escape wirkte erst nach einem Klick ins Overlay. |

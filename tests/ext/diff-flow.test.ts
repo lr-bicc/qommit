@@ -4,6 +4,7 @@ import type { AppSnapshot, FileMap } from "../../src/core/types";
 import { openDiff } from "../../src/ext/flows/diff";
 import { CANON_ID, makeSnapshot } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
+import { gitoqlokFormat, legacyRepo, withValueColours } from "./helpers";
 
 const REPO = "lr-bicc/sales";
 const SHEET = "objects/sheets/sh-1.json";
@@ -102,4 +103,17 @@ test("README and builds are never part of a diff", async () => {
   const d = await openDiff(ports, REPO, { kind: "commit", sha: c1 }, { kind: "commit", sha: c2 });
   expect(d.entries).toEqual([]);
   expect(github.blobReads()).toBe(0);
+});
+
+test("against the app, gitoqlok's format is no difference; between commits it stays one", async () => {
+  const env = fakePorts();
+  const c1 = legacyRepo(env.github);
+  const c2 = await gitoqlokFormat(env.github);
+  withValueColours(env.app.snapshot);
+  const toApp = await openDiff(env.ports, REPO, { kind: "commit", sha: c2 }, { kind: "app" });
+  expect(toApp.entries).toEqual([]);
+  const fromApp = await openDiff(env.ports, REPO, { kind: "app" }, { kind: "commit", sha: c2 });
+  expect(fromApp.entries).toEqual([]);
+  const commits = await openDiff(env.ports, REPO, { kind: "commit", sha: c1 }, { kind: "commit", sha: c2 });
+  expect(commits.entries.map((e) => e.path)).toEqual(["objects/dimensions/dim-1.json", SHEET]);
 });

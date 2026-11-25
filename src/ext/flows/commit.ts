@@ -1,7 +1,8 @@
-import { groupOf } from "../../core/diff";
+import { diffTrees, groupOf } from "../../core/diff";
 import type { CommitInfo, FileChange } from "../../github/repo";
 import type { LinkData } from "../../qlik/link";
 import { GatewayError } from "../shared/github-port";
+import { withoutGitoqlokFormat } from "./gitoqlok-format";
 import { buildLocalFiles, hashFiles, unmaintainedPaths } from "./local-changes";
 import { FlowError, sameMaintainedTree, saveLink, type FlowPorts, markRepository } from "./ports";
 
@@ -56,7 +57,9 @@ export async function commitChanges(
     for (const path of [...scriptPaths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) add(path);
   }
   if (input.removeUnmaintained) {
-    for (const path of unmaintainedPaths(tree)) changes.push({ path, content: null });
+    const { scriptVariables } = await withoutGitoqlokFormat(ports.github, link.repo, tree, files, diffTrees(tree, local));
+    const removable = [...unmaintainedPaths(tree), ...scriptVariables].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const path of removable) if (!seen.has(path)) changes.push({ path, content: null });
   }
   if (changes.length === 0) throw new FlowError("nothing-to-commit", "The selected changes are already in the repository");
 

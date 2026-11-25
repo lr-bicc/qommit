@@ -9,6 +9,7 @@ import { buildLocalFiles } from "../../src/ext/flows/local-changes";
 import { GatewayError } from "../../src/ext/shared/github-port";
 import { ApplyError } from "../../src/qlik/writer";
 import { fakePorts, memoryJournal } from "./fake-ports";
+import { gitoqlokFormat, legacyRepo, withValueColours } from "./helpers";
 
 const REPO = "lr-bicc/sales";
 
@@ -366,4 +367,22 @@ describe("runUpdate", () => {
     expect(texts.slice(0, first).every((t) => /^Loading repository files… \d+\/\d+$/.test(t))).toBe(true);
     expect(texts.slice(first)).toEqual(["Saving backup…", "Updating app… 0/2", "Updating app… 1/2", "Updating app… 2/2", "Saving app…"]);
   });
+});
+
+test("gitoqlok's format is no local change: an update over it creates no backup", async () => {
+  const env = fakePorts();
+  legacyRepo(env.github);
+  const base = await gitoqlokFormat(env.github);
+  withValueColours(env.app.snapshot);
+  const link = { repo: REPO, branch: "main", appId: CANON_ID, syncedSha: base };
+  const measure = makeSnapshot().measures[0]!;
+  const head = await env.github.commitFiles(REPO, { branch: "main", parentSha: base, message: "change",
+    changes: [{ path: `objects/measures/${measure.qInfo.qId}.json`, content: JSON.stringify({ ...measure, qMeasure: { qDef: "Avg(Sales)" } }, null, 2) }] });
+  const input: UpdateInput = { link, target: head, parts: UPDATE_PARTS };
+  const preview = await previewUpdate(env.ports, input);
+  expect(preview.localChanges).toBe(0);
+  expect(preview.items.map((i) => i.id)).toEqual([measure.qInfo.qId]); // qMeta in dim-1's value colours is no change
+  const result = await runUpdate(env.ports, memoryJournal(), input);
+  expect(result.backupBranch).toBeNull();
+  expect(result.applied).toBe(1);
 });

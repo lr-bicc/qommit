@@ -1,6 +1,7 @@
 import { diffTrees, titleOf, type ChangeKind, type ObjectGroup } from "../../core/diff";
 import type { FileContent, FileMap } from "../../core/types";
 import { MAX_BLOBS_PER_CALL } from "../../github/repo";
+import { withoutGitoqlokFormat } from "./gitoqlok-format";
 import { readLocal } from "./local-changes";
 import type { FlowPorts } from "./ports";
 
@@ -38,7 +39,11 @@ export async function openDiff(
     return { hashes: tree, local: null, tree };
   };
   const [b, a] = await Promise.all([stateOf(before), stateOf(after)]);
-  const changes = diffTrees(b.hashes, a.hashes);
+  // Against the app, gitoqlok's format is no difference; between two commits it is what changed.
+  const commitSide = before.kind === "commit" && after.kind === "app" ? b : before.kind === "app" && after.kind === "commit" ? a : null;
+  const changes = commitSide === null
+    ? diffTrees(b.hashes, a.hashes)
+    : (await withoutGitoqlokFormat(ports.github, repo, commitSide.tree!, app!.files, diffTrees(b.hashes, a.hashes))).changes;
 
   const cache = new Map<string, Promise<FileContent | null>>();
   const download = async (state: SideState, path: string): Promise<FileContent | null> => {

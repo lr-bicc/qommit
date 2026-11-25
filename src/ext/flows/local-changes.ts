@@ -3,6 +3,7 @@ import { gitBlobSha } from "../../core/git-hash";
 import { canonicalAppId, parseBranchTable } from "../../core/repo-layout";
 import { serializeApp } from "../../core/serializer";
 import type { AppSnapshot, FileMap } from "../../core/types";
+import { withoutGitoqlokFormat } from "./gitoqlok-format";
 import { FlowError, type FlowPorts } from "./ports";
 
 export interface ChangeItem { path: string; kind: ChangeKind; group: ObjectGroup; part: Part; title: string }
@@ -49,9 +50,11 @@ export async function computeLocalChanges(
   const [{ files, hashes: local }, base] = await Promise.all([
     readLocal(ports, target.repo, onProgress), ports.github.getTree(target.repo, target.baseSha),
   ]);
-  const items = diffTrees(base, local).map((c): ChangeItem => ({
+  const { changes, scriptVariables } = await withoutGitoqlokFormat(ports.github, target.repo, base, files, diffTrees(base, local));
+  const items = changes.map((c): ChangeItem => ({
     path: c.path, kind: c.kind, group: c.group, part: partOf(c.group),
     title: c.kind === "deleted" ? c.path.slice(c.path.lastIndexOf("/") + 1) : titleOf(c.path, files.get(c.path)),
   }));
-  return { repo: target.repo, baseSha: target.baseSha, items, unmaintained: unmaintainedPaths(base) };
+  const unmaintained = [...unmaintainedPaths(base), ...scriptVariables].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return { repo: target.repo, baseSha: target.baseSha, items, unmaintained };
 }

@@ -10,6 +10,14 @@ function asBytes(content: FileContent): Uint8Array {
   return typeof content === "string" ? new TextEncoder().encode(content) : content;
 }
 
+/** gitoqlok kept the engine's `qMeta` in the value colours of a dimension; the app never writes it, so it is dropped. */
+function withoutColorMapStamp(dim: GenericProps): GenericProps {
+  const colors = (dim as { _ColorMapModel?: unknown })._ColorMapModel;
+  if (!colors || typeof colors !== "object" || !("qMeta" in colors)) return dim;
+  const { qMeta: _stamp, ...rest } = colors as Record<string, unknown>;
+  return { ...dim, _ColorMapModel: rest } as GenericProps;
+}
+
 /** Rebuilds a snapshot from repository files. Does not validate; unreadable JSON throws the native error. */
 export function deserializeApp(files: FileMap, opts: { targetAppId: string }): AppSnapshot {
   const parse = <T>(content: FileContent): T => JSON.parse(replaceAppContentIds(asText(content), opts.targetAppId)) as T;
@@ -29,7 +37,7 @@ export function deserializeApp(files: FileMap, opts: { targetAppId: string }): A
     script: filesToScript(files),
     appProps: appProps === undefined ? [] : parse<PropertyTree[]>(appProps),
     variables: list<GenericProps>("variables"),
-    dimensions: list<GenericProps>("dimensions"),
+    dimensions: list<GenericProps>("dimensions").map(withoutColorMapStamp),
     measures: list<GenericProps>("measures"),
     masterObjects: list<PropertyTree>("masterobjects"),
     sheets: list<PropertyTree>("sheets"),

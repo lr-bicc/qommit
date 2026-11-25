@@ -147,7 +147,7 @@ test("removeUnmaintained also deletes files the tool does not maintain", async (
   const { ports, github, link } = await linked();
   const { sha } = (await commitChanges(ports, input(link, { removeUnmaintained: true }))) as { sha: string };
   const files = github.filesAt(link.repo, sha);
-  for (const p of ["loadScript.qvs", "builds/a.qvf", "objects/fields.json"]) expect(files.has(p)).toBe(false);
+  for (const p of ["loadScript.qvs", "builds/a.qvf", "objects/fields.json", "objects/variables/v-script.json"]) expect(files.has(p)).toBe(false);
   expect(files.has("README.md")).toBe(true);
   expect(files.has(NEW_DIM)).toBe(true);
 });
@@ -180,7 +180,7 @@ test("changes follow the selection order, then the unmaintained paths sorted", a
   let changes: { path: string }[] = [];
   github.commitFiles = (repo, inp) => { changes = inp.changes; return spy(repo, inp); };
   await commitChanges(ports, input(link, { paths: [NEW_DIM, changedVar], removeUnmaintained: true }));
-  expect(changes.map((c) => c.path)).toEqual([NEW_DIM, changedVar, "builds/a.qvf", "loadScript.qvs", "objects/fields.json"]);
+  expect(changes.map((c) => c.path)).toEqual([NEW_DIM, changedVar, "builds/a.qvf", "loadScript.qvs", "objects/fields.json", "objects/variables/v-script.json"]);
 });
 
 test("selected paths identical to the head give nothing-to-commit", async () => {

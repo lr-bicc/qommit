@@ -369,3 +369,30 @@ test("readBlobs runs at most 8 requests at a time and reads them all", async () 
   expect(files.size).toBe(30);
   expect(peak).toBe(8);
 });
+test("readBlobs reads JSON files in one GraphQL query and falls back to REST for what it does not return in full", async () => {
+  const m = mockFetch({
+    "POST /graphql": (req) => {
+      const { query, variables } = req.body as { query: string; variables: Record<string, string> };
+      expect(query).toContain("on Blob");
+      expect(variables).toMatchObject({ owner: "lr-bicc", name: "sales", o0: "j1", o1: "j2", o2: "j3" });
+      return { body: { data: { repository: {
+        b0: { text: '{"a":1}', isTruncated: false, isBinary: false },
+        b1: { text: '{"b":', isTruncated: true, isBinary: false },
+        b2: null,
+      } } } };
+    },
+    [`GET ${SR}/git/blobs/j2`]: () => ({ body: { encoding: "base64", content: btoa('{"b":2}') } }),
+    [`GET ${SR}/git/blobs/j3`]: () => ({ body: { encoding: "base64", content: btoa('{"c":3}') } }),
+    [`GET ${SR}/git/blobs/s1`]: () => ({ body: { encoding: "base64", content: btoa("x") } }),
+  });
+  const c = createGitHubClient({ token: "t", fetch: m.fetch });
+  const files = await readBlobs(c, S, [
+    { path: "objects/a.json", sha: "j1" }, { path: "objects/b.json", sha: "j2" }, { path: "objects/c.json", sha: "j3" },
+    { path: "data_load_script/Main.qvs", sha: "s1" },
+  ]);
+  expect([...files].sort()).toEqual([
+    ["data_load_script/Main.qvs", "x"], ["objects/a.json", '{"a":1}'], ["objects/b.json", '{"b":2}'], ["objects/c.json", '{"c":3}'],
+  ]);
+  expect(m.calls.filter((r) => r.url.endsWith("/graphql"))).toHaveLength(1);
+  expect(m.calls.filter((r) => r.url.includes("/git/blobs/")).map((r) => r.url.slice(r.url.lastIndexOf("/") + 1)).sort()).toEqual(["j2", "j3", "s1"]);
+});

@@ -2,7 +2,7 @@ import { buildLocalFiles, computeLocalChanges, hashFiles, unmaintainedPaths } fr
 import { FlowError } from "../../src/ext/flows/ports";
 import { CANON_ID, makeSnapshot } from "../fixtures/snapshot";
 import { fakePorts } from "./fake-ports";
-import { legacyRepo } from "./helpers";
+import { gitoqlokFormat, legacyRepo, withValueColours } from "./helpers";
 
 test("first contact with a gitoqlok repository", async () => {
   const { ports, github, app } = fakePorts();
@@ -16,17 +16,17 @@ test("first contact with a gitoqlok repository", async () => {
   expect(changes.items).toEqual([
     { path: "objects/dimensions/d-new.json", kind: "added", group: "dimensions", part: "objects", title: "Region" },
     { path: `objects/measures/${removed}.json`, kind: "deleted", group: "measures", part: "objects", title: `${removed}.json` },
-    { path: "objects/variables/v-script.json", kind: "deleted", group: "variables", part: "objects", title: "v-script.json" },
   ]);
-  expect(changes.unmaintained).toEqual(["builds/a.qvf", "loadScript.qvs", "objects/fields.json"]);
+  // The script-created variable is not maintained: it is removable, not a local change.
+  expect(changes.unmaintained).toEqual(["builds/a.qvf", "loadScript.qvs", "objects/fields.json", "objects/variables/v-script.json"]);
 });
 
 test("an unchanged app shows no changes although its own id differs from the canonical one", async () => {
   const { ports, github } = fakePorts();
   const base = legacyRepo(github);
   const { items } = await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
-  // legacyRepo also holds a script-created variable, which the tool never writes: that is the only difference.
-  expect(items.map((i) => i.path)).toEqual(["objects/variables/v-script.json"]);
+  // legacyRepo also holds a script-created variable, which the tool never writes: not a local change.
+  expect(items).toEqual([]);
 });
 
 test("without a branch table the app's own id is the canonical one", async () => {
@@ -86,4 +86,44 @@ test("hashFiles hashes text and bytes like git", async () => {
   const hashes = await hashFiles(new Map<string, string | Uint8Array>([["a", "hello\n"], ["b", new Uint8Array()]]));
   expect(hashes.get("a")).toBe("ce013625030ba8dba906f756967f9e9ca394464a");
   expect(hashes.get("b")).toBe("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+});
+
+test("gitoqlok's format alone is no local change: script variables, another app id in urls, qMeta in value colours", async () => {
+  const { ports, github, app } = fakePorts();
+  legacyRepo(github);
+  const base = await gitoqlokFormat(github);
+  withValueColours(app.snapshot);
+  const changes = await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
+  expect(changes.items).toEqual([]);
+  expect(changes.unmaintained).toContain("objects/variables/v-script.json");
+});
+
+test("real changes still show next to gitoqlok's format", async () => {
+  const { ports, github, app } = fakePorts();
+  legacyRepo(github);
+  const base = await gitoqlokFormat(github);
+  withValueColours(app.snapshot);
+  app.snapshot.sheets[0]!.qProperty.qMetaDef = { title: "Overview (new)" };
+  app.snapshot.variables = app.snapshot.variables.filter((v) => v.qInfo.qId !== "var-1"); // a maintained variable
+  const { items } = await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
+  expect(items.map((i) => [i.path, i.kind])).toEqual([
+    ["objects/sheets/sh-1.json", "changed"], ["objects/variables/var-1.json", "deleted"],
+  ]);
+});
+
+test("repository blobs are downloaded once per content, not on every comparison", async () => {
+  const { ports, github, app } = fakePorts();
+  legacyRepo(github);
+  await gitoqlokFormat(github);
+  // A blob no other test holds, so the first comparison must download it.
+  const base = await github.commitFiles("lr-bicc/sales", { branch: "main", parentSha: github.head("lr-bicc/sales", "main"), message: "v", changes: [
+    { path: "objects/variables/v-once.json", content: '{"qInfo":{"qId":"v-once","qType":"variable"},"qName":"vOnce","qIsScriptCreated":true}' },
+  ] });
+  withValueColours(app.snapshot);
+  const before = github.blobReads();
+  await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
+  const first = github.blobReads();
+  expect(first).toBeGreaterThan(before);
+  await computeLocalChanges(ports, { repo: "lr-bicc/sales", baseSha: base });
+  expect(github.blobReads()).toBe(first);
 });
