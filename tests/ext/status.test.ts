@@ -258,6 +258,14 @@ describe("resolveStatus", () => {
       expect(await resolveStatus(ports)).toEqual({ state: "published", repo: REPO, branch: "main", syncedSha: merge });
     });
 
+    it("published before the merge: the copy's branch and commit, until the default branch holds that commit", async () => {
+      const { ports, github, app, first } = setup({ info: { published: true } }, { readmeApp: CANON_ID });
+      await github.createBranch(REPO, "e2e", first);
+      const onCopy = await commit(github, "e2e", "1");
+      app.link = { repo: REPO, branch: "e2e", appId: COPY_ID, syncedSha: onCopy };
+      expect(await resolveStatus(ports)).toEqual({ state: "published", repo: REPO, branch: "e2e", syncedSha: onCopy });
+    });
+
     it("the app's row in the branch table names its branch", async () => {
       const { ports, github, app, first } = setup({ info: { published: true } }, { readmeApp: CANON_ID, devRow: true });
       await github.createBranch(REPO, "dev", first);

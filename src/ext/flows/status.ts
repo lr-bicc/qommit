@@ -51,13 +51,17 @@ async function publishedFrom(ports: FlowPorts, repo: string, branch: string, rec
 
 /**
  * The branch a published app stands for when its link object came from a copy ("Publish and replace" carries the copy's
- * link along): the app's row in the branch table, else the default branch. Null when the repository is not found.
+ * link along): the app's row in the branch table, else the default branch, once that branch holds the published commit.
+ * Until the copy's branch is merged there, it stays the copy's branch.
  */
-async function publishedBranch(github: GitHubPort, repo: string, appId: string): Promise<string | null> {
-  const found = await linkedRepo(github, repo);
-  if (!found) return null;
-  const readme = await github.readTextFile(repo, found.defaultBranch, "README.md");
-  return (readme === null ? null : findBranchForApp(parseBranchTable(readme), appId)) ?? found.defaultBranch;
+async function publishedBranch(github: GitHubPort, link: LinkData, appId: string): Promise<string> {
+  const found = await linkedRepo(github, link.repo);
+  if (!found) return link.branch;
+  const readme = await github.readTextFile(link.repo, found.defaultBranch, "README.md");
+  const branch = (readme === null ? null : findBranchForApp(parseBranchTable(readme), appId)) ?? found.defaultBranch;
+  if (branch === link.branch || !link.syncedSha) return branch;
+  const head = await github.getBranchSha(link.repo, branch);
+  return head !== null && (await isAncestor(github, link.repo, link.syncedSha, head)) ? branch : link.branch;
 }
 
 async function resolveLinked(ports: FlowPorts, link: LinkData, stored: "app" | "local"): Promise<AppStatus> {
@@ -90,7 +94,7 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
 
   if (link) {
     if (info.published) {
-      const branch = sameId(link.appId, info.id) ? link.branch : (await publishedBranch(github, link.repo, info.id)) ?? link.branch;
+      const branch = sameId(link.appId, info.id) ? link.branch : await publishedBranch(github, link, info.id);
       const syncedSha = await publishedFrom(ports, link.repo, branch, link.syncedSha);
       return { state: "published", repo: link.repo, branch, syncedSha };
     }
