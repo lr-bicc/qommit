@@ -12,7 +12,7 @@ test("build writes a loadable extension", () => {
   expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toEqual({
     manifest_version: 3,
     name: "Qommit",
-    version: "0.1.0",
+    version: "0.1.1",
     description: "Version control for Qlik Sense apps with GitHub.",
     minimum_chrome_version: "116",
     permissions: ["storage", "scripting", "sidePanel"],

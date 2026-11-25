@@ -28,6 +28,15 @@ const placed = (f: Frame): Frame => {
     width, height,
   };
 };
+/** Where the window opens the first time: 80 % of the page, centred, so it can be moved at once. */
+const initialFrame = (): Frame => {
+  const width = Math.round(window.innerWidth * 0.8);
+  const height = Math.round(window.innerHeight * 0.8);
+  return placed({
+    left: Math.round((window.innerWidth - width) / 2), top: Math.round((window.innerHeight - height) / 2),
+    width: Math.max(width, MIN_WIDTH), height: Math.max(height, MIN_HEIGHT),
+  });
+};
 const sized = (f: Frame): Frame => ({
   ...f,
   width: Math.max(MIN_WIDTH, Math.min(f.width, window.innerWidth - f.left)),
@@ -125,7 +134,7 @@ function FileView(props: { source: DiffSource; path: string }): JSX.Element {
 
 export function DiffOverlay(props: {
   source: DiffSource; select?: string; title: string; onClose(): void;
-  /** Where the window opens (null: the default frame), and the callback after each move or resize. */
+  /** Where the window opens (null: 80 % of the page, centred), and the callback after each move or resize. */
   frame?: Frame | null; onFrame?(frame: Frame): void;
   /**
    * "Maximize": shows the diff in its own window, starting at the entry shown here. Without it, or when it rejects,
@@ -142,7 +151,7 @@ export function DiffOverlay(props: {
     props.select !== undefined && source.entries.some((e) => e.path === props.select) ? props.select : first,
   );
   const overlay = useRef<HTMLDivElement>(null);
-  const [frame, setFrame] = useState<Frame | null>(props.frame ? placed(props.frame) : null);
+  const [frame, setFrame] = useState<Frame>(() => (props.frame ? placed(props.frame) : initialFrame()));
   const inWindow = props.mode === "window";
   /** Filling the page, where no own window can be opened. */
   const [max, setMax] = useState(false);
@@ -150,7 +159,7 @@ export function DiffOverlay(props: {
 
   useEffect(() => {
     // The page narrows when the side panel opens or grows: the window moves back into view.
-    const onResize = (): void => setFrame((f) => (f === null ? f : placed(f)));
+    const onResize = (): void => setFrame((f) => placed(f));
     window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("resize", onResize);
@@ -206,7 +215,7 @@ export function DiffOverlay(props: {
   const sizeLabel = max ? "Restore" : "Maximize";
   return (
     <div ref={overlay} class={inWindow ? "overlay window" : max ? "overlay max" : "overlay"} role="dialog" aria-label={props.title}
-      style={frame !== null && !max && !inWindow ? px(frame) : undefined}>
+      style={!max && !inWindow ? px(frame) : undefined}>
       <style>{STYLE}</style>
       <header onPointerDown={(e) => drag(e, "move")}>
         <h1>{props.title}</h1>

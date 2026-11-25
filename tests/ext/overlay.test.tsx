@@ -256,13 +256,21 @@ describe("window", () => {
   };
   const frame = (): string[] => ["left", "top", "width", "height"].map((k) => overlay().style.getPropertyValue(k));
 
+  test("the window opens at 80 % of the page, centred, so it can be moved at once", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    const w = Math.round(innerWidth * 0.8);
+    const h = Math.round(innerHeight * 0.8);
+    expect(frame()).toEqual([`${Math.round((innerWidth - w) / 2)}px`, `${Math.round((innerHeight - h) / 2)}px`, `${w}px`, `${h}px`]);
+  });
+
   test("the title bar moves the window; its buttons do not", () => {
     showDiffOverlay(sourceOf(FILES), { title: "t" });
+    const opened = frame();
     overlay().getBoundingClientRect = at(24, 24, 800, 600);
     pointer(button("Close")!, "pointerdown", 900, 30);
     pointer(document, "pointermove", 950, 80);
     pointer(document, "pointerup", 950, 80);
-    expect(frame()).toEqual(["", "", "", ""]);
+    expect(frame()).toEqual(opened);
 
     pointer(root().querySelector("header")!, "pointerdown", 100, 30);
     pointer(document, "pointermove", 150, 80);
