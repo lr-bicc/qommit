@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { waitFor } from "@testing-library/preact";
 import type { FileContent } from "../../src/core/types";
-import { closeDiffOverlay, showDiffOverlay } from "../../src/ext/content/overlay/show";
+import { closeDiffOverlay, handleDiffWindowRequest, setDiffWindowOpener, showDiffOverlay } from "../../src/ext/content/overlay/show";
 import type { DiffEntry, DiffSource } from "../../src/ext/flows/diff";
 import { FlowError } from "../../src/ext/flows/ports";
 
@@ -164,55 +164,89 @@ test("the maximized window has no frame and no gap to the window edges", () => {
 
 describe("window", () => {
   const overlay = (): HTMLElement => root().querySelector(".overlay") as HTMLElement;
-  const original = { request: HTMLElement.prototype.requestFullscreen, exit: document.exitFullscreen };
-  let fullscreen: Element | null = null;
-  const calls: string[] = [];
-  const changed = (): void => { document.dispatchEvent(new Event("fullscreenchange")); };
-
+  const opened: string[] = [];
   beforeEach(() => {
-    fullscreen = null;
-    calls.length = 0;
-    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreen });
-    HTMLElement.prototype.requestFullscreen = async function (this: HTMLElement) { calls.push("request"); fullscreen = this; changed(); };
-    document.exitFullscreen = async () => { calls.push("exit"); fullscreen = null; changed(); };
+    opened.length = 0;
+    setDiffWindowOpener(async (id) => { opened.push(id); });
   });
-  afterEach(() => {
-    delete (document as { fullscreenElement?: unknown }).fullscreenElement;
-    HTMLElement.prototype.requestFullscreen = original.request;
-    document.exitFullscreen = original.exit;
+  afterEach(async () => {
+    await handleDiffWindowRequest({ kind: "closed" });
+    setDiffWindowOpener(null);
     closeDiffOverlay();
   });
 
-  test("Maximize puts the window in full screen; Restore and the browser's Esc end it", async () => {
-    showDiffOverlay(sourceOf(FILES), { title: "t" });
+  test("Maximize opens the diff in its own window, with the entry the overlay shows, and closes the overlay", async () => {
+    showDiffOverlay(sourceOf(FILES), { select: "objects/sheets/s1.json", title: "Local changes" });
     expect(button("Maximize")!.textContent).toBe("□");
+    click("Main");
+    await waitFor(() => expect(root().querySelectorAll(".removed").length).toBe(1));
     click("Maximize");
-    await waitFor(() => expect(button("Restore")!.textContent).toBe("❐"));
-    expect(fullscreen).toBe(overlay());
-
-    // In full screen, Esc belongs to the browser: it leaves full screen, the window stays open.
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(host()).not.toBeNull();
-    fullscreen = null;
-    changed();
-    await waitFor(() => expect(button("Maximize")).toBeDefined());
-
-    click("Maximize");
-    await waitFor(() => expect(button("Restore")).toBeDefined());
-    click("Restore");
-    await waitFor(() => expect(button("Maximize")).toBeDefined());
-    expect(fullscreen).toBeNull();
-    expect(calls).toEqual(["request", "request", "exit"]);
+    await waitFor(() => expect(host()).toBeNull());
+    expect(opened).toHaveLength(1);
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[0]! })).toEqual({
+      ok: true, value: { title: "Local changes", select: "data_load_script/Main.qvs", repo: "lr-bicc/sales", entries },
+    });
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "data_load_script/Main.qvs" })).toEqual({
+      ok: true, value: { before: { text: "a\nb" }, after: { text: "a\nc" } },
+    });
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "objects/sheets/s1.json" })).toEqual({
+      ok: true, value: { before: null, after: { text: "{}" } },
+    });
   });
 
-  test("where the browser refuses full screen, Maximize fills the page", async () => {
-    HTMLElement.prototype.requestFullscreen = async () => { throw new TypeError("not allowed"); };
+  test("binary content travels as Base64; a contents error keeps its code", async () => {
+    const source = sourceOf({
+      "data_load_script/Main.qvs": { before: new Uint8Array([1, 2, 3]), after: null },
+      "objects/sheets/s1.json": new FlowError("repo-not-found", "x"),
+    });
+    showDiffOverlay(source, { title: "t" });
+    click("Maximize");
+    await waitFor(() => expect(opened).toHaveLength(1));
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "data_load_script/Main.qvs" })).toEqual({
+      ok: true, value: { before: { base64: "AQID" }, after: null },
+    });
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "objects/sheets/s1.json" })).toEqual({
+      ok: false, error: { code: "repo-not-found", message: "x" },
+    });
+  });
+
+  test("while the window is open, further diffs go to it; once it is closed, to the page again", async () => {
+    showDiffOverlay(sourceOf(FILES), { title: "first" });
+    click("Maximize");
+    await waitFor(() => expect(opened).toHaveLength(1));
+
+    showDiffOverlay(sourceOf(FILES), { title: "second", select: "data_load_script/Main.qvs" });
+    await waitFor(() => expect(opened).toHaveLength(2));
+    expect(host()).toBeNull();
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[1]! })).toMatchObject({ ok: true, value: { title: "second" } });
+    // The window shows only the latest diff: an older one is gone.
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[0]! })).toMatchObject({ ok: false, error: { code: "diff-gone" } });
+
+    expect(await handleDiffWindowRequest({ kind: "closed" })).toEqual({ ok: true, value: null });
+    showDiffOverlay(sourceOf(FILES), { title: "third" });
+    expect(host()).not.toBeNull();
+    expect(opened).toHaveLength(2);
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[1]! })).toMatchObject({ ok: false, error: { code: "diff-gone" } });
+  });
+
+  test("where no window can be opened, Maximize fills the page and Restore brings back the frame", async () => {
+    setDiffWindowOpener(async () => { throw new Error("windows.create failed"); });
     showDiffOverlay(sourceOf(FILES), { title: "t" });
     click("Maximize");
     await waitFor(() => expect(overlay().classList.contains("max")).toBe(true));
+    expect(host()).not.toBeNull();
     click("Restore");
     await waitFor(() => expect(overlay().classList.contains("max")).toBe(false));
-    expect(calls).toEqual([]);
+    // A failed window does not count as open: the next diff comes into the page.
+    closeDiffOverlay();
+    showDiffOverlay(sourceOf(FILES), { title: "again" });
+    expect(host()).not.toBeNull();
+  });
+
+  test("Esc closes the overlay", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(host()).toBeNull();
   });
 
   const at = (left: number, top: number, width: number, height: number) => () =>

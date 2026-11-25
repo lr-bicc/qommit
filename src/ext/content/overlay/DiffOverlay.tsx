@@ -46,6 +46,8 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .overlay.max header { cursor: default; }
 header h1 { margin: 0; font-size: 15px; }
 .overlay.max { inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+.overlay.window { inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+.overlay.window header { cursor: default; }
 .actions { display: flex; gap: 4px; }
 .icon { width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; font: 16px/1 system-ui, sans-serif; cursor: pointer; }
 .icon:hover { background: #eaeef2; border-color: #d0d7de; }
@@ -125,6 +127,13 @@ export function DiffOverlay(props: {
   source: DiffSource; select?: string; title: string; onClose(): void;
   /** Where the window opens (null: the default frame), and the callback after each move or resize. */
   frame?: Frame | null; onFrame?(frame: Frame): void;
+  /**
+   * "Maximize": shows the diff in its own window, starting at the entry shown here. Without it, or when it rejects,
+   * the overlay fills the page instead.
+   */
+  onMaximize?(select: string | null): Promise<void>;
+  /** "window": the diff fills its own window (no Maximize, no moving or resizing); default "page". */
+  mode?: "page" | "window";
 }): JSX.Element {
   const { source } = props;
   const list = useMemo(() => sections<DiffEntry>(source.entries), [source]);
@@ -134,47 +143,34 @@ export function DiffOverlay(props: {
   );
   const overlay = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState<Frame | null>(props.frame ? placed(props.frame) : null);
-  /** In the browser's full screen (the whole monitor). */
-  const [full, setFull] = useState(false);
-  /** Filling the page, where the browser refuses full screen. */
-  const [filled, setFilled] = useState(false);
-  const max = full || filled;
+  const inWindow = props.mode === "window";
+  /** Filling the page, where no own window can be opened. */
+  const [max, setMax] = useState(false);
   const stopDrag = useRef<(() => void) | null>(null);
 
-  /** Follows the browser: full screen also ends by its Esc or its own controls. */
-  const syncFull = (): void => {
-    const el = overlay.current;
-    const now = document.fullscreenElement ?? null;
-    // The page sees the shadow host as the full-screen element.
-    setFull(el !== null && now !== null && (now === el || now === (el.getRootNode() as ShadowRoot).host));
-  };
   useEffect(() => {
     // The page narrows when the side panel opens or grows: the window moves back into view.
     const onResize = (): void => setFrame((f) => (f === null ? f : placed(f)));
-    document.addEventListener("fullscreenchange", syncFull);
     window.addEventListener("resize", onResize);
     return () => {
-      document.removeEventListener("fullscreenchange", syncFull);
       window.removeEventListener("resize", onResize);
       stopDrag.current?.();
     };
   }, []);
 
   const toggle = (): void => {
-    if (full) { void document.exitFullscreen(); return; }
-    if (filled) { setFilled(false); return; }
-    const el = overlay.current;
-    if (el === null || typeof el.requestFullscreen !== "function") { setFilled(true); return; }
-    el.requestFullscreen().then(syncFull, (e: unknown) => {
-      console.warn("[qommit] Chrome refused full screen; the window fills the page instead.", e);
-      setFilled(true);
+    if (max) { setMax(false); return; }
+    if (props.onMaximize === undefined) { setMax(true); return; }
+    props.onMaximize(selected).catch((e: unknown) => {
+      console.warn("[qommit] the diff window did not open; the diff fills the page instead.", e);
+      setMax(true);
     });
   };
 
   /** Moves (title bar) or resizes (corner) the window with the pointer. */
   const drag = (event: PointerEvent, kind: "move" | "resize"): void => {
     const el = overlay.current;
-    if (event.button !== 0 || max || el === null) return;
+    if (event.button !== 0 || max || inWindow || el === null) return;
     if (kind === "move" && (event.target as Element).closest("button") !== null) return;
     event.preventDefault();
     stopDrag.current?.();
@@ -209,13 +205,15 @@ export function DiffOverlay(props: {
 
   const sizeLabel = max ? "Restore" : "Maximize";
   return (
-    <div ref={overlay} class={max ? "overlay max" : "overlay"} role="dialog" aria-label={props.title}
-      style={frame !== null && !max ? px(frame) : undefined}>
+    <div ref={overlay} class={inWindow ? "overlay window" : max ? "overlay max" : "overlay"} role="dialog" aria-label={props.title}
+      style={frame !== null && !max && !inWindow ? px(frame) : undefined}>
       <style>{STYLE}</style>
       <header onPointerDown={(e) => drag(e, "move")}>
         <h1>{props.title}</h1>
         <div class="actions">
-          <button type="button" class="icon" aria-label={sizeLabel} title={sizeLabel} onClick={toggle}>{max ? "❐" : "□"}</button>
+          {!inWindow && (
+            <button type="button" class="icon" aria-label={sizeLabel} title={sizeLabel} onClick={toggle}>{max ? "❐" : "□"}</button>
+          )}
           <button type="button" class="icon" aria-label="Close" title="Close" onClick={props.onClose}>✕</button>
         </div>
       </header>
@@ -240,7 +238,7 @@ export function DiffOverlay(props: {
           <main>{selected !== null && <FileView source={source} path={selected} />}</main>
         </div>
       )}
-      {!max && <div class="grip" aria-hidden="true" onPointerDown={(e) => drag(e, "resize")} />}
+      {!max && !inWindow && <div class="grip" aria-hidden="true" onPointerDown={(e) => drag(e, "resize")} />}
     </div>
   );
 }

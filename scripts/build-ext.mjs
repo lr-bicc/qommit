@@ -26,6 +26,7 @@ for (const [entry, out] of [
   [join(src, "content", "content.ts"), "content"],
   [join(src, "panel", "main.tsx"), "panel"],
   [join(src, "options", "main.tsx"), "options"],
+  [join(src, "diffwin", "main.tsx"), "diff"],
 ]) {
   await build({ ...common, entryPoints: [{ in: entry, out }], outdir: outDir, format: "iife" });
 }
@@ -34,3 +35,4 @@ await copyFile(join(src, "manifest.json"), join(outDir, "manifest.json"));
 await copyFile(join(src, "panel", "panel.html"), join(outDir, "panel.html"));
 await copyFile(join(src, "panel", "panel.css"), join(outDir, "panel.css"));
 await copyFile(join(src, "options", "options.html"), join(outDir, "options.html"));
+await copyFile(join(src, "diffwin", "diff.html"), join(outDir, "diff.html"));
