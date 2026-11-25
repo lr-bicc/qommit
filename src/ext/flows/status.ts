@@ -44,7 +44,20 @@ async function publishedFrom(ports: FlowPorts, repo: string, branch: string, rec
   if (!recorded) return recorded;
   const head = await ports.github.getBranchSha(repo, branch);
   if (head === null || head === recorded || !(await isAncestor(ports.github, repo, recorded, head))) return recorded;
+  // Only the README or unmaintained files moved on, as with a merge commit: the app holds the head.
+  if (await sameMaintainedTree(ports.github, repo, recorded, head)) return head;
   return startingCommit(ports, repo, recorded, head);
+}
+
+/**
+ * The branch a published app stands for when its link object came from a copy ("Publish and replace" carries the copy's
+ * link along): the app's row in the branch table, else the default branch. Null when the repository is not found.
+ */
+async function publishedBranch(github: GitHubPort, repo: string, appId: string): Promise<string | null> {
+  const found = await linkedRepo(github, repo);
+  if (!found) return null;
+  const readme = await github.readTextFile(repo, found.defaultBranch, "README.md");
+  return (readme === null ? null : findBranchForApp(parseBranchTable(readme), appId)) ?? found.defaultBranch;
 }
 
 async function resolveLinked(ports: FlowPorts, link: LinkData, stored: "app" | "local"): Promise<AppStatus> {
@@ -77,8 +90,9 @@ export async function resolveStatus(ports: FlowPorts): Promise<AppStatus> {
 
   if (link) {
     if (info.published) {
-      const syncedSha = await publishedFrom(ports, link.repo, link.branch, link.syncedSha);
-      return { state: "published", repo: link.repo, branch: link.branch, syncedSha };
+      const branch = sameId(link.appId, info.id) ? link.branch : (await publishedBranch(github, link.repo, info.id)) ?? link.branch;
+      const syncedSha = await publishedFrom(ports, link.repo, branch, link.syncedSha);
+      return { state: "published", repo: link.repo, branch, syncedSha };
     }
     if (sameId(link.appId, info.id)) return resolveLinked(ports, link, "app");
     const repo = await linkedRepo(github, link.repo);

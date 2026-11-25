@@ -236,5 +236,33 @@ describe("resolveStatus", () => {
       expect(status).toEqual({ state: "published", repo: REPO, branch: "main", syncedSha: c2 });
     });
   });
-});
 
+  describe("published over with a copy (Publish and replace carries the copy's link object)", () => {
+    const COPY_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const SHEET = "objects/sheets/sh-1.json";
+
+    it("the app stands for the default branch: published from its merge commit, not from the copy's branch", async () => {
+      const { ports, github, app } = setup({ info: { published: true } }, { readmeApp: CANON_ID });
+      const changed = makeSnapshot();
+      changed.sheets[0]!.qProperty.qMetaDef = { title: "Overview (E2E)" };
+      const c1 = await github.commitFiles(REPO, { branch: "main", parentSha: github.head(REPO, "main"), message: "app",
+        changes: [...serializeApp(makeSnapshot(), { canonicalAppId: CANON_ID })].map(([path, content]) => ({ path, content })) });
+      // The copy's commit on its branch, then merged into main (the merge adds nothing the app holds).
+      const onCopy = await github.commitFiles(REPO, { branch: "main", parentSha: c1, message: "E2E",
+        changes: [{ path: SHEET, content: serializeApp(changed, { canonicalAppId: CANON_ID }).get(SHEET)! }] });
+      await github.createBranch(REPO, "e2e", onCopy);
+      const merge = await github.commitFiles(REPO, { branch: "main", parentSha: onCopy, message: "Merge pull request #32",
+        changes: [{ path: "README.md", content: "# merged" }] });
+      app.snapshot = changed;
+      app.link = { repo: REPO, branch: "e2e", appId: COPY_ID, syncedSha: onCopy };
+      expect(await resolveStatus(ports)).toEqual({ state: "published", repo: REPO, branch: "main", syncedSha: merge });
+    });
+
+    it("the app's row in the branch table names its branch", async () => {
+      const { ports, github, app, first } = setup({ info: { published: true } }, { readmeApp: CANON_ID, devRow: true });
+      await github.createBranch(REPO, "dev", first);
+      app.link = { repo: REPO, branch: "e2e", appId: COPY_ID, syncedSha: first };
+      expect(await resolveStatus(ports)).toEqual({ state: "published", repo: REPO, branch: "dev", syncedSha: first });
+    });
+  });
+});

@@ -91,26 +91,27 @@ export function LocalChangesTab(props: TabProps): JSX.Element {
 
   useEffect(() => () => { alive.current = false; }, []);
 
-  const load = useCallback(async (): Promise<boolean> => {
+  /** Loads the list; the answer, or null when it failed or a newer load replaced it. */
+  const load = useCallback(async (): Promise<LocalChanges | null> => {
     const mine = ++request.current;
     setLoading(true);
     setFailure((f) => (f?.source === "load" ? null : f));
     try {
       const next = await bridge.send<LocalChanges>({ cmd: "localChanges" });
-      if (!alive.current || mine !== request.current) return false;
+      if (!alive.current || mine !== request.current) return null;
       const paths = new Set(next.items.map((i) => i.path));
       // A list that changed under an open selection: drop vanished paths, select new ones like at the start.
       setSelection((old) => new Set([...paths].filter((p) => old.has(p) || !known.current.has(p))));
       known.current = paths;
       setData(next);
-      return true;
+      return next;
     } catch (e) {
-      if (!alive.current || mine !== request.current) return false;
+      if (!alive.current || mine !== request.current) return null;
       known.current = new Set();
       setData(null);
       setCommitting(false);
       setFailure({ source: "load", error: toCommandError(e) });
-      return false;
+      return null;
     } finally {
       if (alive.current && mine === request.current) setLoading(false);
     }
@@ -124,8 +125,12 @@ export function LocalChangesTab(props: TabProps): JSX.Element {
   const busy = loading || saving;
   const canSave = !busy && !saved && message.trim() !== "" && (selection.size > 0 || removing);
 
-  function startCommit(): void {
-    setSelection(initialSelection(items));
+  /** The app may have changed since the list was loaded: the commit mode starts from what the app holds now. */
+  async function startCommit(): Promise<void> {
+    const fresh = await load();
+    if (!alive.current || fresh === null) return;
+    if (fresh.items.length === 0 && fresh.unmaintained.length === 0) return; // the list shows "No local changes"
+    setSelection(initialSelection(fresh.items));
     setMessage("");
     setRemoveUnmaintained(true);
     setFailure(null);
@@ -251,7 +256,7 @@ export function LocalChangesTab(props: TabProps): JSX.Element {
         <>
           {!readOnly && (
             <div class="buttons">
-              <button type="button" class="primary" disabled={busy || (items.length === 0 && unmaintained.length === 0)} onClick={startCommit}>Save changes</button>
+              <button type="button" class="primary" disabled={busy} onClick={() => void startCommit()}>Save changes</button>
             </div>
           )}
           {items.length === 0 && <p class="muted">No local changes</p>}

@@ -51,8 +51,9 @@ const linkedBridge = (answers: Partial<Record<Command["cmd"], unknown[]>>): Fake
 const panelOf = (bridge: FakeBridge) => ({ run: <T,>(command: Command): Promise<T> => bridge.send<T>(command), isBusy: () => false, busy: false });
 
 test("saves the selected paths, shows Success and loads status and changes again", async () => {
-  const bridge = linkedBridge({ localChanges: [changes(TWO, ["loadScript.qvs"]), changes([])], commit: [{ sha: "n".repeat(40) }] });
-  const second = hold(bridge, "localChanges", 2);
+  // Loads: opening the panel, "Save changes", after the commit.
+  const bridge = linkedBridge({ localChanges: [changes(TWO, ["loadScript.qvs"]), changes(TWO, ["loadScript.qvs"]), changes([])], commit: [{ sha: "n".repeat(40) }] });
+  const second = hold(bridge, "localChanges", 3);
   await openCommit(bridge);
   fireEvent.click(check("Overview"));
   fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
@@ -113,10 +114,39 @@ test("only unmaintained files can be removed on their own", async () => {
   expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
 });
 
-test("Save changes is locked without entries and without unmaintained files", async () => {
-  render(<App bridge={linkedBridge({ localChanges: [changes([])] })} />);
+test("Save changes reads the app again; with nothing to save the list stays", async () => {
+  const bridge = linkedBridge({ localChanges: [changes([])] });
+  render(<App bridge={bridge} />);
   await screen.findByText("No local changes");
-  expect((screen.getByText("Save changes") as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(bridge.commands.filter((c) => c.cmd === "localChanges")).toHaveLength(2));
+  await flush();
+  expect(screen.queryByText("Choose what to save")).toBeNull();
+  expect(screen.getByText("No local changes")).toBeTruthy();
+});
+
+test("Save changes starts from what the app holds now, not from the list shown before", async () => {
+  // The panel was opened before the sheets were changed in Qlik.
+  const bridge = linkedBridge({ localChanges: [changes([], ["loadScript.qvs"]), changes(TWO, ["loadScript.qvs"])], commit: [{ sha: "n".repeat(40) }] });
+  render(<App bridge={bridge} />);
+  await screen.findByText("No local changes");
+  fireEvent.click(screen.getByText("Save changes"));
+  await screen.findByText("Choose what to save");
+  expect(check("Overview").checked).toBe(true);
+  expect(check("Details").checked).toBe(true);
+  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Rename" } });
+  fireEvent.click(screen.getByText("Save"));
+  await screen.findByText("Success");
+  expect(bridge.commands.find((c) => c.cmd === "commit")).toMatchObject({ paths: ["objects/sheets/s1.json", "objects/sheets/s2.json"], removeUnmaintained: true });
+});
+
+test("a failed load on Save changes shows the error and stays out of the commit mode", async () => {
+  const bridge = linkedBridge({ localChanges: [changes(TWO), new BridgeError({ code: "network", message: "x" })] });
+  render(<App bridge={bridge} />);
+  fireEvent.click(await screen.findByText("Save changes"));
+  const alert = await screen.findByRole("alert");
+  expect(within(alert).getByText("Network error.")).toBeTruthy();
+  expect(screen.queryByText("Choose what to save")).toBeNull();
 });
 
 test("checkboxes of parts and groups follow their entries", async () => {
@@ -316,11 +346,11 @@ test("a changed reload token loads the changes again", async () => {
 });
 
 test("onSaved is called after a successful save", async () => {
-  const bridge = fakeBridge({ localChanges: [changes(TWO), changes([])], commit: [{ sha: "n" }] });
+  const bridge = fakeBridge({ localChanges: [changes(TWO), changes(TWO), changes([])], commit: [{ sha: "n" }] });
   const onSaved = vi.fn();
   render(<LocalChangesTab bridge={bridge} panel={panelOf(bridge)} appId={APP_ID} readOnly={false} onSaved={onSaved} />);
   fireEvent.click(await screen.findByText("Save changes"));
-  fireEvent.input(screen.getByPlaceholderText("Commit message"), { target: { value: "Fix" } });
+  fireEvent.input(await screen.findByPlaceholderText("Commit message"), { target: { value: "Fix" } });
   fireEvent.click(screen.getByText("Save"));
   await screen.findByText("No local changes");
   expect(onSaved).toHaveBeenCalledTimes(1);
@@ -424,7 +454,7 @@ test("a failed Commit anyway stays in the dialog and sends allowBehind only per 
 
 test("a failed reload after a save shows the error with Retry", async () => {
   const bridge = linkedBridge({
-    localChanges: [changes(TWO), new BridgeError({ code: "network", message: "x" }), changes([])],
+    localChanges: [changes(TWO), changes(TWO), new BridgeError({ code: "network", message: "x" }), changes([])],
     commit: [{ sha: "n" }],
   });
   await openCommit(bridge);
