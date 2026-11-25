@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { lineDiff } from "../../../core/diff";
 import type { FileContent } from "../../../core/types";
 import type { DiffEntry, DiffSource } from "../../flows/diff";
@@ -11,17 +11,39 @@ import { sideBySide, type SideCell } from "./side-by-side";
 
 type Contents = { before: FileContent | null; after: FileContent | null };
 type Loaded = { path: string; contents: Contents } | { path: string; error: CommandError };
+/** Where the window stands on the page, in CSS pixels. */
+export type Frame = { left: number; top: number; width: number; height: number };
+
+const MIN_WIDTH = 480;
+const MIN_HEIGHT = 240;
+/** How much of the title bar stays on the page, so the window can always be dragged back. */
+const KEEP_X = 80;
+const KEEP_Y = 40;
+
+const placed = (f: Frame): Frame => ({
+  ...f,
+  left: Math.min(Math.max(f.left, KEEP_X - f.width), window.innerWidth - KEEP_X),
+  top: Math.min(Math.max(f.top, 0), window.innerHeight - KEEP_Y),
+});
+const sized = (f: Frame): Frame => ({ ...f, width: Math.max(f.width, MIN_WIDTH), height: Math.max(f.height, MIN_HEIGHT) });
+const px = (f: Frame): Record<string, string> => ({
+  left: `${f.left}px`, top: `${f.top}px`, width: `${f.width}px`, height: `${f.height}px`, right: "auto", bottom: "auto",
+});
 
 const STYLE = `
 :host { all: initial; }
 .overlay { position: fixed; inset: 24px; z-index: 2147483647; display: flex; flex-direction: column; background: #fff; color: #1f2328;
   border: 1px solid #8c959f; border-radius: 6px; box-shadow: 0 8px 32px rgba(0,0,0,.4); font: 13px/1.4 system-ui, sans-serif; }
-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #d0d7de; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #d0d7de;
+  cursor: move; user-select: none; touch-action: none; }
+.overlay.max header { cursor: default; }
 header h1 { margin: 0; font-size: 15px; }
 .overlay.max { inset: 0; border: 0; border-radius: 0; box-shadow: none; }
 .actions { display: flex; gap: 4px; }
 .icon { width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; font: 16px/1 system-ui, sans-serif; cursor: pointer; }
 .icon:hover { background: #eaeef2; border-color: #d0d7de; }
+.grip { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, #8c959f 50%, #8c959f 60%, transparent 60%, transparent 75%, #8c959f 75%, #8c959f 85%, transparent 85%); }
 button { font: inherit; cursor: pointer; }
 .body { display: flex; flex: 1; min-height: 0; }
 nav { width: 300px; overflow: auto; border-right: 1px solid #d0d7de; padding: 8px; }
@@ -94,8 +116,8 @@ function FileView(props: { source: DiffSource; path: string }): JSX.Element {
 
 export function DiffOverlay(props: {
   source: DiffSource; select?: string; title: string; onClose(): void;
-  /** Whether the window opens maximized, and the callback for each change of it. */
-  maximized?: boolean; onMaximize?(maximized: boolean): void;
+  /** Where the window opens (null: the default frame), and the callback after each move or resize. */
+  frame?: Frame | null; onFrame?(frame: Frame): void;
 }): JSX.Element {
   const { source } = props;
   const list = useMemo(() => sections<DiffEntry>(source.entries), [source]);
@@ -103,16 +125,80 @@ export function DiffOverlay(props: {
   const [selected, setSelected] = useState<string | null>(
     props.select !== undefined && source.entries.some((e) => e.path === props.select) ? props.select : first,
   );
-  const [max, setMax] = useState(props.maximized === true);
-  const toggle = (): void => {
-    setMax(!max);
-    props.onMaximize?.(!max);
+  const overlay = useRef<HTMLDivElement>(null);
+  const [frame, setFrame] = useState<Frame | null>(props.frame ? placed(props.frame) : null);
+  /** In the browser's full screen (the whole monitor). */
+  const [full, setFull] = useState(false);
+  /** Filling the page, where the browser refuses full screen. */
+  const [filled, setFilled] = useState(false);
+  const max = full || filled;
+  const stopDrag = useRef<(() => void) | null>(null);
+
+  /** Follows the browser: full screen also ends by its Esc or its own controls. */
+  const syncFull = (): void => {
+    const el = overlay.current;
+    const now = document.fullscreenElement ?? null;
+    // The page sees the shadow host as the full-screen element.
+    setFull(el !== null && now !== null && (now === el || now === (el.getRootNode() as ShadowRoot).host));
   };
+  useEffect(() => {
+    document.addEventListener("fullscreenchange", syncFull);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFull);
+      stopDrag.current?.();
+    };
+  }, []);
+
+  const toggle = (): void => {
+    if (full) { void document.exitFullscreen(); return; }
+    if (filled) { setFilled(false); return; }
+    const el = overlay.current;
+    if (el === null || typeof el.requestFullscreen !== "function") { setFilled(true); return; }
+    el.requestFullscreen().then(syncFull, () => setFilled(true));
+  };
+
+  /** Moves (title bar) or resizes (corner) the window with the pointer. */
+  const drag = (event: PointerEvent, kind: "move" | "resize"): void => {
+    const el = overlay.current;
+    if (event.button !== 0 || max || el === null) return;
+    if (kind === "move" && (event.target as Element).closest("button") !== null) return;
+    event.preventDefault();
+    stopDrag.current?.();
+    const r = el.getBoundingClientRect();
+    const begin: Frame = { left: r.left, top: r.top, width: r.width, height: r.height };
+    const x = event.clientX;
+    const y = event.clientY;
+    let current: Frame | null = null;
+    const onMove = (e: PointerEvent): void => {
+      const dx = e.clientX - x;
+      const dy = e.clientY - y;
+      current = kind === "move"
+        ? placed({ ...begin, left: begin.left + dx, top: begin.top + dy })
+        : sized({ ...begin, width: begin.width + dx, height: begin.height + dy });
+      Object.assign(el.style, px(current));
+    };
+    const stop = (): void => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      stopDrag.current = null;
+    };
+    const onUp = (): void => {
+      stop();
+      if (current !== null) { setFrame(current); props.onFrame?.(current); }
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    stopDrag.current = stop;
+  };
+
   const sizeLabel = max ? "Restore" : "Maximize";
   return (
-    <div class={max ? "overlay max" : "overlay"} role="dialog" aria-label={props.title}>
+    <div ref={overlay} class={max ? "overlay max" : "overlay"} role="dialog" aria-label={props.title}
+      style={frame !== null && !max ? px(frame) : undefined}>
       <style>{STYLE}</style>
-      <header>
+      <header onPointerDown={(e) => drag(e, "move")}>
         <h1>{props.title}</h1>
         <div class="actions">
           <button type="button" class="icon" aria-label={sizeLabel} title={sizeLabel} onClick={toggle}>{max ? "❐" : "□"}</button>
@@ -140,6 +226,7 @@ export function DiffOverlay(props: {
           <main>{selected !== null && <FileView source={source} path={selected} />}</main>
         </div>
       )}
+      {!max && <div class="grip" aria-hidden="true" onPointerDown={(e) => drag(e, "resize")} />}
     </div>
   );
 }

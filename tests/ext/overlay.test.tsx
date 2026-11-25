@@ -156,32 +156,119 @@ test("the close button is an X icon labelled Close", () => {
   expect(close.title).toBe("Close");
 });
 
-test("Maximize fills the window, Restore brings back the frame; the choice holds for the next overlay", async () => {
-  const overlay = (): HTMLElement => root().querySelector(".overlay") as HTMLElement;
-  showDiffOverlay(sourceOf(FILES), { title: "t" });
-  expect(overlay().classList.contains("max")).toBe(false);
-  expect(button("Restore")).toBeUndefined();
-  expect(button("Maximize")!.textContent).toBe("□");
-
-  click("Maximize");
-  await waitFor(() => expect(overlay().classList.contains("max")).toBe(true));
-  expect(button("Maximize")).toBeUndefined();
-  expect(button("Restore")!.textContent).toBe("❐");
-  expect(button("Restore")!.title).toBe("Restore");
-
-  click("Close");
-  showDiffOverlay(sourceOf(FILES), { title: "again" });
-  expect(overlay().classList.contains("max")).toBe(true);
-
-  click("Restore");
-  await waitFor(() => expect(overlay().classList.contains("max")).toBe(false));
-  click("Close");
-  showDiffOverlay(sourceOf(FILES), { title: "third" });
-  expect(overlay().classList.contains("max")).toBe(false);
-});
-
 test("the maximized window has no frame and no gap to the window edges", () => {
   showDiffOverlay(sourceOf(FILES), { title: "t" });
   const style = root().querySelector("style")!.textContent!;
   expect(style).toMatch(/\.overlay\.max \{[^}]*inset: 0;[^}]*border-radius: 0;/);
+});
+
+describe("window", () => {
+  const overlay = (): HTMLElement => root().querySelector(".overlay") as HTMLElement;
+  const original = { request: HTMLElement.prototype.requestFullscreen, exit: document.exitFullscreen };
+  let fullscreen: Element | null = null;
+  const calls: string[] = [];
+  const changed = (): void => { document.dispatchEvent(new Event("fullscreenchange")); };
+
+  beforeEach(() => {
+    fullscreen = null;
+    calls.length = 0;
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreen });
+    HTMLElement.prototype.requestFullscreen = async function (this: HTMLElement) { calls.push("request"); fullscreen = this; changed(); };
+    document.exitFullscreen = async () => { calls.push("exit"); fullscreen = null; changed(); };
+  });
+  afterEach(() => {
+    delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+    HTMLElement.prototype.requestFullscreen = original.request;
+    document.exitFullscreen = original.exit;
+    closeDiffOverlay();
+  });
+
+  test("Maximize puts the window in full screen; Restore and the browser's Esc end it", async () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    expect(button("Maximize")!.textContent).toBe("□");
+    click("Maximize");
+    await waitFor(() => expect(button("Restore")!.textContent).toBe("❐"));
+    expect(fullscreen).toBe(overlay());
+
+    // In full screen, Esc belongs to the browser: it leaves full screen, the window stays open.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(host()).not.toBeNull();
+    fullscreen = null;
+    changed();
+    await waitFor(() => expect(button("Maximize")).toBeDefined());
+
+    click("Maximize");
+    await waitFor(() => expect(button("Restore")).toBeDefined());
+    click("Restore");
+    await waitFor(() => expect(button("Maximize")).toBeDefined());
+    expect(fullscreen).toBeNull();
+    expect(calls).toEqual(["request", "request", "exit"]);
+  });
+
+  test("where the browser refuses full screen, Maximize fills the page", async () => {
+    HTMLElement.prototype.requestFullscreen = async () => { throw new TypeError("not allowed"); };
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    click("Maximize");
+    await waitFor(() => expect(overlay().classList.contains("max")).toBe(true));
+    click("Restore");
+    await waitFor(() => expect(overlay().classList.contains("max")).toBe(false));
+    expect(calls).toEqual([]);
+  });
+
+  const at = (left: number, top: number, width: number, height: number) => () =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  const pointer = (target: EventTarget, type: string, x: number, y: number): void => {
+    target.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, button: 0 }));
+  };
+  const frame = (): string[] => ["left", "top", "width", "height"].map((k) => overlay().style.getPropertyValue(k));
+
+  test("the title bar moves the window; its buttons do not", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    pointer(button("Close")!, "pointerdown", 900, 30);
+    pointer(document, "pointermove", 950, 80);
+    pointer(document, "pointerup", 950, 80);
+    expect(frame()).toEqual(["", "", "", ""]);
+
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", 150, 80);
+    pointer(document, "pointerup", 150, 80);
+    expect(frame()).toEqual(["74px", "74px", "800px", "600px"]);
+    pointer(document, "pointermove", 500, 500); // after the release nothing moves
+    expect(frame()).toEqual(["74px", "74px", "800px", "600px"]);
+  });
+
+  test("the title bar stays reachable: the window cannot leave the page", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", -2000, -2000);
+    pointer(document, "pointerup", -2000, -2000);
+    const [left, top] = frame();
+    expect(top).toBe("0px");
+    expect(left).toBe(`${80 - 800}px`);
+  });
+
+  test("the corner resizes the window, not below a minimum", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    const grip = root().querySelector(".grip")!;
+    pointer(grip, "pointerdown", 824, 624);
+    pointer(document, "pointermove", 900, 700);
+    expect(frame()).toEqual(["24px", "24px", "876px", "676px"]);
+    pointer(document, "pointermove", 0, 0);
+    pointer(document, "pointerup", 0, 0);
+    expect(frame()).toEqual(["24px", "24px", "480px", "240px"]);
+  });
+
+  test("position and size hold for the next window in the tab", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", 110, 40);
+    pointer(document, "pointerup", 110, 40);
+    click("Close");
+    showDiffOverlay(sourceOf(FILES), { title: "again" });
+    expect(frame()).toEqual(["34px", "34px", "800px", "600px"]);
+  });
 });
