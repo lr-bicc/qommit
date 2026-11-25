@@ -223,7 +223,7 @@ Ziel ist der Branch-HEAD oder ein in der Commit-Auswahl gewählter älterer Comm
 
 ### 6.7 History und Diff
 - **History:** Commits des Branches (paginiert, 30 pro Seite) mit Autor, Datum, Nachricht, Tag-Badges. Aktionen: „Diff to previous“, „Diff to app“, „Add tag“, „Update app to this commit“.
-- **Diff („details“):** Overlay in der Qlik-Seite; links die geänderten Objekte nach Typ mit Titel, rechts die Gegenüberstellung. Skripte zeilenweise nebeneinander (je Tab), JSON als Zeilen-Diff.
+- **Diff („details“):** Overlay in der Qlik-Seite; links die geänderten Objekte nach Typ mit Titel, rechts die Gegenüberstellung. Skripte zeilenweise nebeneinander (je Tab), JSON als Zeilen-Diff. Im Kopf rechts zwei Symbole: □ „Maximize“ legt das Overlay randlos über das ganze Fenster, ❐ „Restore“ stellt den Rahmen wieder her; ✕ „Close“ schließt es. Die Wahl gilt für weitere Overlays im selben Tab, bis die Seite neu geladen wird.
 - **Pull Request:** Auf einem Branch ungleich Default-Branch zeigt das Panel den Link „Open pull request on GitHub“ (öffnet die Vergleichsseite `compare/<default>...<branch>`).
 
 ### 6.8 Tags
@@ -371,3 +371,4 @@ Fällt eine Antwort negativ aus, wird die Spec vor der Umsetzung angepasst.
 | 4.4 | Snapshots in Stories werden nach `SetFullPropertyTree` eigens eingebettet (vorübergehendes Snapshot-Bookmark, `EmbedSnapshotObject`). Ihre ID und die Auswahl beim Aufnehmen (`qBookmark`) werden nicht versioniert und gelten nicht als Unterschied. | Abnahme Schritt 13 (Spike-Frage 6): Eine aus `bonus-scorecards` importierte App hatte keine Snapshots; alle vier Stories erschienen als geändert. Die Engine übergeht `qEmbeddedSnapshotRef` in `SetFullPropertyTree` und vergibt beim Einbetten stets eine neue ID. |
 | 5 | Eine veröffentlichte App mit dem Link-Objekt einer Kopie (fremde `appId`) steht für ihre Zeile in der Branch-Tabelle, sonst für den Default-Branch, sobald dieser ihren Commit enthält; vorher für den Branch der Kopie. „Published from commit“ rückt auf den HEAD vor, wenn sich nur README oder nicht gepflegte Dateien unterscheiden. | Abnahme Schritt 15: Nach Merge und „Publish and replace“ zeigte die veröffentlichte „Supply Chain Performance“ Branch `Test` und den Commit der Kopie statt `main` und des Merge-Commits. |
 | 6.1, 6.5 | „Save changes“ ermittelt die lokalen Änderungen neu, bevor der Commit-Modus öffnet, und ist auch bei leerer Liste aktiv. | Abnahme Schritt 15: Ein Sheet wurde umbenannt, nachdem das Panel die Liste geladen hatte; der Commit-Dialog zeigte die alte Liste, und der Commit enthielt die Umbenennung nicht. |
+| 6.7 | Das Diff-Overlay lässt sich maximieren (□/❐) und schließt über ✕ statt „Close“. | Wunsch aus der Abnahme: mehr Platz für lange Diffs. |

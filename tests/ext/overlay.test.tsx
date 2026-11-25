@@ -26,8 +26,11 @@ const FILES: Record<string, Contents> = {
 };
 const host = (): HTMLElement | null => document.getElementById("qommit-diff");
 const root = (): ShadowRoot => host()!.shadowRoot!;
+/** A button by its text or, for icon buttons, its aria-label. */
+const button = (label: string): HTMLButtonElement | undefined =>
+  [...root().querySelectorAll("button")].find((b) => b.textContent === label || b.getAttribute("aria-label") === label);
 const click = (label: string): void => {
-  const el = [...root().querySelectorAll("button")].find((b) => b.textContent === label);
+  const el = button(label);
   if (!el) throw new Error(`no button ${label}`);
   el.click();
 };
@@ -144,4 +147,41 @@ test("a binary file with an absent side shows a dash for it", async () => {
 test("no entries show No differences", () => {
   showDiffOverlay(sourceOf({}, []), { title: "t" });
   expect(root().textContent).toContain("No differences");
+});
+
+test("the close button is an X icon labelled Close", () => {
+  showDiffOverlay(sourceOf(FILES), { title: "t" });
+  const close = button("Close")!;
+  expect(close.textContent).toBe("✕");
+  expect(close.title).toBe("Close");
+});
+
+test("Maximize fills the window, Restore brings back the frame; the choice holds for the next overlay", async () => {
+  const overlay = (): HTMLElement => root().querySelector(".overlay") as HTMLElement;
+  showDiffOverlay(sourceOf(FILES), { title: "t" });
+  expect(overlay().classList.contains("max")).toBe(false);
+  expect(button("Restore")).toBeUndefined();
+  expect(button("Maximize")!.textContent).toBe("□");
+
+  click("Maximize");
+  await waitFor(() => expect(overlay().classList.contains("max")).toBe(true));
+  expect(button("Maximize")).toBeUndefined();
+  expect(button("Restore")!.textContent).toBe("❐");
+  expect(button("Restore")!.title).toBe("Restore");
+
+  click("Close");
+  showDiffOverlay(sourceOf(FILES), { title: "again" });
+  expect(overlay().classList.contains("max")).toBe(true);
+
+  click("Restore");
+  await waitFor(() => expect(overlay().classList.contains("max")).toBe(false));
+  click("Close");
+  showDiffOverlay(sourceOf(FILES), { title: "third" });
+  expect(overlay().classList.contains("max")).toBe(false);
+});
+
+test("the maximized window has no frame and no gap to the window edges", () => {
+  showDiffOverlay(sourceOf(FILES), { title: "t" });
+  const style = root().querySelector("style")!.textContent!;
+  expect(style).toMatch(/\.overlay\.max \{[^}]*inset: 0;[^}]*border-radius: 0;/);
 });

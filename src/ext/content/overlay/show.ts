@@ -3,6 +3,8 @@ import type { DiffSource } from "../../flows/diff";
 import { DiffOverlay } from "./DiffOverlay";
 
 let closeCurrent: (() => void) | null = null;
+/** "Maximize" holds for the overlays this page opens later, until the page is loaded again. */
+let maximized = false;
 
 /** Closes the open overlay, as "Close" does; true when one was open. */
 export function closeDiffOverlay(): boolean {
@@ -30,5 +32,8 @@ export function showDiffOverlay(source: DiffSource, opts: { select?: string; tit
   };
   closeCurrent = close;
   document.addEventListener("keydown", onKey, true);
-  render(h(DiffOverlay, { source, select: opts.select, title: opts.title, onClose: close }), shadow);
+  render(h(DiffOverlay, {
+    source, select: opts.select, title: opts.title, onClose: close,
+    maximized, onMaximize: (value: boolean) => { maximized = value; },
+  }), shadow);
 }

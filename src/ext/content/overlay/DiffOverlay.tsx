@@ -18,6 +18,10 @@ const STYLE = `
   border: 1px solid #8c959f; border-radius: 6px; box-shadow: 0 8px 32px rgba(0,0,0,.4); font: 13px/1.4 system-ui, sans-serif; }
 header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #d0d7de; }
 header h1 { margin: 0; font-size: 15px; }
+.overlay.max { inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+.actions { display: flex; gap: 4px; }
+.icon { width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: inherit; font: 16px/1 system-ui, sans-serif; cursor: pointer; }
+.icon:hover { background: #eaeef2; border-color: #d0d7de; }
 button { font: inherit; cursor: pointer; }
 .body { display: flex; flex: 1; min-height: 0; }
 nav { width: 300px; overflow: auto; border-right: 1px solid #d0d7de; padding: 8px; }
@@ -88,19 +92,32 @@ function FileView(props: { source: DiffSource; path: string }): JSX.Element {
   return binary ? <Binary contents={loaded.contents} /> : <SideBySide contents={loaded.contents} />;
 }
 
-export function DiffOverlay(props: { source: DiffSource; select?: string; title: string; onClose(): void }): JSX.Element {
+export function DiffOverlay(props: {
+  source: DiffSource; select?: string; title: string; onClose(): void;
+  /** Whether the window opens maximized, and the callback for each change of it. */
+  maximized?: boolean; onMaximize?(maximized: boolean): void;
+}): JSX.Element {
   const { source } = props;
   const list = useMemo(() => sections<DiffEntry>(source.entries), [source]);
   const first = list[0]?.groups[0]?.items[0]?.path ?? null;
   const [selected, setSelected] = useState<string | null>(
     props.select !== undefined && source.entries.some((e) => e.path === props.select) ? props.select : first,
   );
+  const [max, setMax] = useState(props.maximized === true);
+  const toggle = (): void => {
+    setMax(!max);
+    props.onMaximize?.(!max);
+  };
+  const sizeLabel = max ? "Restore" : "Maximize";
   return (
-    <div class="overlay" role="dialog" aria-label={props.title}>
+    <div class={max ? "overlay max" : "overlay"} role="dialog" aria-label={props.title}>
       <style>{STYLE}</style>
       <header>
         <h1>{props.title}</h1>
-        <button type="button" onClick={props.onClose}>Close</button>
+        <div class="actions">
+          <button type="button" class="icon" aria-label={sizeLabel} title={sizeLabel} onClick={toggle}>{max ? "❐" : "□"}</button>
+          <button type="button" class="icon" aria-label="Close" title="Close" onClick={props.onClose}>✕</button>
+        </div>
       </header>
       {source.entries.length === 0 ? <div class="message">No differences</div> : (
         <div class="body">
