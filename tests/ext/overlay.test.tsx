@@ -238,15 +238,15 @@ describe("window", () => {
     expect(frame()).toEqual(["74px", "74px", "800px", "600px"]);
   });
 
-  test("the title bar stays reachable: the window cannot leave the page", () => {
+  test("the whole window stays on the page, also on the side of the side panel", () => {
     showDiffOverlay(sourceOf(FILES), { title: "t" });
     overlay().getBoundingClientRect = at(24, 24, 800, 600);
     pointer(root().querySelector("header")!, "pointerdown", 100, 30);
     pointer(document, "pointermove", -2000, -2000);
-    pointer(document, "pointerup", -2000, -2000);
-    const [left, top] = frame();
-    expect(top).toBe("0px");
-    expect(left).toBe(`${80 - 800}px`);
+    expect(frame()).toEqual(["0px", "0px", "800px", "600px"]);
+    pointer(document, "pointermove", 5000, 5000);
+    pointer(document, "pointerup", 5000, 5000);
+    expect(frame()).toEqual([`${innerWidth - 800}px`, `${innerHeight - 600}px`, "800px", "600px"]);
   });
 
   test("the corner resizes the window, not below a minimum", () => {
@@ -256,9 +256,29 @@ describe("window", () => {
     pointer(grip, "pointerdown", 824, 624);
     pointer(document, "pointermove", 900, 700);
     expect(frame()).toEqual(["24px", "24px", "876px", "676px"]);
+    pointer(document, "pointermove", 5000, 5000);
+    expect(frame()).toEqual(["24px", "24px", `${innerWidth - 24}px`, `${innerHeight - 24}px`]);
     pointer(document, "pointermove", 0, 0);
     pointer(document, "pointerup", 0, 0);
     expect(frame()).toEqual(["24px", "24px", "480px", "240px"]);
+  });
+
+  test("when the page narrows (side panel opens), the window moves back into view", async () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 400, 300);
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", 5000, 100);
+    pointer(document, "pointerup", 5000, 100);
+    expect(frame()[0]).toBe(`${innerWidth - 400}px`);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // effects run after the first paint
+    const wide = innerWidth;
+    (window as unknown as { happyDOM: { setInnerWidth(w: number): void } }).happyDOM.setInnerWidth(wide - 300);
+    window.dispatchEvent(new Event("resize"));
+    try {
+      await waitFor(() => expect(frame()[0]).toBe(`${wide - 300 - 400}px`));
+    } finally {
+      (window as unknown as { happyDOM: { setInnerWidth(w: number): void } }).happyDOM.setInnerWidth(wide);
+    }
   });
 
   test("position and size hold for the next window in the tab", () => {

@@ -16,16 +16,23 @@ export type Frame = { left: number; top: number; width: number; height: number }
 
 const MIN_WIDTH = 480;
 const MIN_HEIGHT = 240;
-/** How much of the title bar stays on the page, so the window can always be dragged back. */
-const KEEP_X = 80;
-const KEEP_Y = 40;
 
-const placed = (f: Frame): Frame => ({
+const within = (value: number, low: number, high: number): number => Math.max(low, Math.min(value, high));
+/** The whole window stays on the page: nothing slides under the side panel or off the edges. */
+const placed = (f: Frame): Frame => {
+  const width = Math.min(f.width, window.innerWidth);
+  const height = Math.min(f.height, window.innerHeight);
+  return {
+    left: within(f.left, 0, window.innerWidth - width),
+    top: within(f.top, 0, window.innerHeight - height),
+    width, height,
+  };
+};
+const sized = (f: Frame): Frame => ({
   ...f,
-  left: Math.min(Math.max(f.left, KEEP_X - f.width), window.innerWidth - KEEP_X),
-  top: Math.min(Math.max(f.top, 0), window.innerHeight - KEEP_Y),
+  width: Math.max(MIN_WIDTH, Math.min(f.width, window.innerWidth - f.left)),
+  height: Math.max(MIN_HEIGHT, Math.min(f.height, window.innerHeight - f.top)),
 });
-const sized = (f: Frame): Frame => ({ ...f, width: Math.max(f.width, MIN_WIDTH), height: Math.max(f.height, MIN_HEIGHT) });
 const px = (f: Frame): Record<string, string> => ({
   left: `${f.left}px`, top: `${f.top}px`, width: `${f.width}px`, height: `${f.height}px`, right: "auto", bottom: "auto",
 });
@@ -142,9 +149,13 @@ export function DiffOverlay(props: {
     setFull(el !== null && now !== null && (now === el || now === (el.getRootNode() as ShadowRoot).host));
   };
   useEffect(() => {
+    // The page narrows when the side panel opens or grows: the window moves back into view.
+    const onResize = (): void => setFrame((f) => (f === null ? f : placed(f)));
     document.addEventListener("fullscreenchange", syncFull);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("fullscreenchange", syncFull);
+      window.removeEventListener("resize", onResize);
       stopDrag.current?.();
     };
   }, []);
@@ -154,7 +165,10 @@ export function DiffOverlay(props: {
     if (filled) { setFilled(false); return; }
     const el = overlay.current;
     if (el === null || typeof el.requestFullscreen !== "function") { setFilled(true); return; }
-    el.requestFullscreen().then(syncFull, () => setFilled(true));
+    el.requestFullscreen().then(syncFull, (e: unknown) => {
+      console.warn("[qommit] Chrome refused full screen; the window fills the page instead.", e);
+      setFilled(true);
+    });
   };
 
   /** Moves (title bar) or resizes (corner) the window with the pointer. */
