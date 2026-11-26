@@ -3,10 +3,11 @@ import enigma from "enigma.js";
 import { openGlobal, openSession, type EnigmaCreate } from "../../qlik/session";
 import type { LinkData } from "../../qlik/link";
 import type { LinkCache } from "../flows/ports";
-import type { Command, ProgressEvent } from "../shared/commands";
+import type { Command, CommandResult, ProgressEvent } from "../shared/commands";
+import type { DiffWindowMessage, OpenDiffWindow } from "../shared/diff-window";
 import { createGitHubPort, type GatewayRequest, type GatewayResponse } from "../shared/github-port";
 import { loadOptions } from "../shared/options";
-import { closeDiffOverlay, showDiffOverlay } from "./overlay/show";
+import { closeDiffOverlay, handleDiffWindowRequest, setDiffWindowOpener, showDiffOverlay } from "./overlay/show";
 import { createJournal } from "./journal";
 import { createRouter } from "./router";
 import { createServerPort } from "./server-port";
@@ -68,6 +69,22 @@ function start(): void {
       // rejects when no panel is open
       chrome.runtime.sendMessage({ target: "panel", event }).catch(() => {});
     },
+  });
+
+  // "Maximize" shows the diff in its own window; the service worker opens it.
+  setDiffWindowOpener(async (id) => {
+    const s = screen as Screen & { availLeft?: number; availTop?: number };
+    const area = { left: s.availLeft ?? 0, top: s.availTop ?? 0, width: s.availWidth, height: s.availHeight };
+    const open: OpenDiffWindow = { target: "diffWindow", id, area };
+    const result = (await chrome.runtime.sendMessage(open)) as CommandResult | undefined;
+    if (!result?.ok) throw new Error(result && !result.ok ? result.error.message : "No answer from the service worker");
+  });
+
+  chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+    const m = message as Partial<DiffWindowMessage> | null;
+    if (m?.target !== "diffWindowContent" || sender.id !== chrome.runtime.id) return undefined;
+    void handleDiffWindowRequest(m as DiffWindowMessage).then(sendResponse);
+    return true;
   });
 
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

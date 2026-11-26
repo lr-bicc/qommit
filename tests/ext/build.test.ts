@@ -6,13 +6,13 @@ import { join } from "node:path";
 test("build writes a loadable extension", () => {
   const out = mkdtempSync(join(tmpdir(), "qommit-ext-"));
   execFileSync("node", ["scripts/build-ext.mjs", out], { stdio: "pipe" });
-  for (const f of ["manifest.json", "sw.js", "content.js", "panel.html", "panel.js", "options.html", "options.js"]) {
+  for (const f of ["manifest.json", "sw.js", "content.js", "panel.html", "panel.js", "options.html", "options.js", "diff.html", "diff.js"]) {
     expect(existsSync(join(out, f)), f).toBe(true);
   }
   expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toEqual({
     manifest_version: 3,
     name: "Qommit",
-    version: "0.1.0",
+    version: "0.1.1",
     description: "Version control for Qlik Sense apps with GitHub.",
     minimum_chrome_version: "116",
     permissions: ["storage", "scripting", "sidePanel"],
@@ -24,4 +24,5 @@ test("build writes a loadable extension", () => {
     options_ui: { page: "options.html", open_in_tab: true },
   });
   expect(readFileSync(join(out, "panel.html"), "utf8")).toContain('<script src="panel.js"></script>');
+  expect(readFileSync(join(out, "diff.html"), "utf8")).toContain('<script src="diff.js"></script>');
 }, 60_000);

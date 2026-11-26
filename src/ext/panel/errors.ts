@@ -43,6 +43,7 @@ export function errorText(error: CommandError): ErrorText {
     }
     case "invalid-target": return { text: "The selected state contains files that cannot be applied." };
     case "update-failed": return { text: "The update stopped.", detail: error.message };
+    case "diff-gone": return { text: "This diff is no longer available. Open it again from the Qommit panel." };
     default: return { text: error.message };
   }
 }

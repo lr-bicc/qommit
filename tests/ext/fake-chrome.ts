@@ -21,13 +21,16 @@ export interface FakeChrome {
   removedPermissions: string[][]; // origins of each chrome.permissions.remove call
   sent: unknown[]; // chrome.runtime.sendMessage payloads
   respond: (message: any) => unknown; // answer for runtime.sendMessage / tabs.sendMessage
-  tabs: { id?: number; url?: string; active?: boolean }[]; // result of chrome.tabs.query
+  tabs: { id?: number; url?: string; active?: boolean; windowId?: number }[]; // result of chrome.tabs.query
+  windows: { id: number; url: string; type?: string; state?: string; focused?: boolean; left?: number; top?: number; width?: number; height?: number }[]; // open windows
   tabMessages: { tabId: number; message: unknown }[];
   injected: { tabId: number; files: string[] }[]; // chrome.scripting.executeScript calls
   panelOptions: unknown[]; // chrome.sidePanel.setOptions calls
   panelBehaviors: unknown[]; // chrome.sidePanel.setPanelBehavior calls
   optionsPageOpened: number;
-  emitMessage(message: unknown, sender?: unknown): void; // fires runtime.onMessage listeners
+  emitMessage(message: unknown, sender?: unknown, sendResponse?: (response: unknown) => void): void; // fires runtime.onMessage listeners
+  emitWindowRemoved(windowId: number): void; // fires windows.onRemoved listeners
+  emitTabRemoved(tabId: number): void; // fires tabs.onRemoved listeners
   emitInstalled(details?: unknown): void; // fires runtime.onInstalled listeners
   emitTabUpdated(tabId: number, changeInfo: unknown, tab?: unknown): void; // fires tabs.onUpdated listeners
 }
@@ -37,6 +40,9 @@ export function installFakeChrome(): FakeChrome {
   const onMessage = eventTarget();
   const onInstalled = eventTarget();
   const onUpdated = eventTarget();
+  const onWindowRemoved = eventTarget();
+  const onTabRemoved = eventTarget();
+  let nextWindowId = 1;
 
   const fake: FakeChrome = {
     store: {},
@@ -48,14 +54,21 @@ export function installFakeChrome(): FakeChrome {
     sent: [],
     respond: () => undefined,
     tabs: [],
+    windows: [],
     tabMessages: [],
     injected: [],
     panelOptions: [],
     panelBehaviors: [],
     optionsPageOpened: 0,
-    emitMessage(message, sender = { id: "qommit-test" }) {
+    emitMessage(message, sender = { id: "qommit-test" }, sendResponse = () => {}) {
       const delivered = clone(message);
-      for (const fn of [...onMessage.listeners]) fn(delivered, sender, () => {});
+      for (const fn of [...onMessage.listeners]) fn(delivered, sender, sendResponse);
+    },
+    emitWindowRemoved(windowId) {
+      for (const fn of [...onWindowRemoved.listeners]) fn(windowId);
+    },
+    emitTabRemoved(tabId) {
+      for (const fn of [...onTabRemoved.listeners]) fn(tabId, { windowId: 0, isWindowClosing: false });
     },
     emitInstalled(details = { reason: "install" }) {
       for (const fn of [...onInstalled.listeners]) fn(details);
@@ -121,6 +134,7 @@ export function installFakeChrome(): FakeChrome {
     },
     runtime: {
       id: "qommit-test",
+      getURL: (path: string) => `chrome-extension://qommit-test/${path}`,
       async sendMessage(message: unknown) {
         const sent = clone(message);
         fake.sent.push(sent);
@@ -138,9 +152,20 @@ export function installFakeChrome(): FakeChrome {
         fake.tabMessages.push({ tabId, message: sent });
         return answer(sent);
       },
-      async query() {
-        return clone(fake.tabs);
+      async query(info: { windowId?: number } = {}) {
+        return clone(fake.tabs.filter((t) => info.windowId === undefined || t.windowId === info.windowId));
       },
+      async update(tabId: number, props: { url?: string }) {
+        const tab = fake.tabs.find((t) => t.id === tabId);
+        if (!tab) throw new Error(`No tab with id: ${tabId}.`);
+        if (props.url !== undefined) {
+          tab.url = props.url;
+          const win = fake.windows.find((w) => w.id === tab.windowId);
+          if (win) win.url = props.url;
+        }
+        return clone(tab);
+      },
+      onRemoved: onTabRemoved,
       async get(tabId: number) {
         const tab = fake.tabs.find((t) => t.id === tabId);
         if (!tab) throw new Error(`No tab with id: ${tabId}.`);
@@ -153,6 +178,29 @@ export function installFakeChrome(): FakeChrome {
         fake.injected.push({ tabId: injection.target.tabId, files: [...(injection.files ?? [])] });
         return [];
       },
+    },
+    windows: {
+      async create(data: { url: string; type?: string; state?: string; left?: number; top?: number; width?: number; height?: number }) {
+        const id = nextWindowId++;
+        fake.windows.push({ id, ...data, state: data.state ?? "normal", focused: true });
+        fake.tabs.push({ id: 1000 + id, url: data.url, windowId: id });
+        return { id };
+      },
+      async update(windowId: number, info: { focused?: boolean; state?: string }) {
+        const win = fake.windows.find((w) => w.id === windowId);
+        if (!win) throw new Error(`No window with id: ${windowId}.`);
+        if (info.focused !== undefined) win.focused = info.focused;
+        if (info.state !== undefined) win.state = info.state;
+        return clone(win);
+      },
+      async remove(windowId: number) {
+        const at = fake.windows.findIndex((w) => w.id === windowId);
+        if (at < 0) throw new Error(`No window with id: ${windowId}.`);
+        fake.windows.splice(at, 1);
+        fake.tabs = fake.tabs.filter((t) => t.windowId !== windowId);
+        fake.emitWindowRemoved(windowId);
+      },
+      onRemoved: onWindowRemoved,
     },
     sidePanel: {
       async setOptions(options: unknown) {

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { waitFor } from "@testing-library/preact";
 import type { FileContent } from "../../src/core/types";
-import { closeDiffOverlay, showDiffOverlay } from "../../src/ext/content/overlay/show";
+import { closeDiffOverlay, handleDiffWindowRequest, setDiffWindowOpener, showDiffOverlay } from "../../src/ext/content/overlay/show";
 import type { DiffEntry, DiffSource } from "../../src/ext/flows/diff";
 import { FlowError } from "../../src/ext/flows/ports";
 
@@ -156,32 +156,181 @@ test("the close button is an X icon labelled Close", () => {
   expect(close.title).toBe("Close");
 });
 
-test("Maximize fills the window, Restore brings back the frame; the choice holds for the next overlay", async () => {
-  const overlay = (): HTMLElement => root().querySelector(".overlay") as HTMLElement;
-  showDiffOverlay(sourceOf(FILES), { title: "t" });
-  expect(overlay().classList.contains("max")).toBe(false);
-  expect(button("Restore")).toBeUndefined();
-  expect(button("Maximize")!.textContent).toBe("□");
-
-  click("Maximize");
-  await waitFor(() => expect(overlay().classList.contains("max")).toBe(true));
-  expect(button("Maximize")).toBeUndefined();
-  expect(button("Restore")!.textContent).toBe("❐");
-  expect(button("Restore")!.title).toBe("Restore");
-
-  click("Close");
-  showDiffOverlay(sourceOf(FILES), { title: "again" });
-  expect(overlay().classList.contains("max")).toBe(true);
-
-  click("Restore");
-  await waitFor(() => expect(overlay().classList.contains("max")).toBe(false));
-  click("Close");
-  showDiffOverlay(sourceOf(FILES), { title: "third" });
-  expect(overlay().classList.contains("max")).toBe(false);
-});
-
 test("the maximized window has no frame and no gap to the window edges", () => {
   showDiffOverlay(sourceOf(FILES), { title: "t" });
   const style = root().querySelector("style")!.textContent!;
   expect(style).toMatch(/\.overlay\.max \{[^}]*inset: 0;[^}]*border-radius: 0;/);
+});
+
+describe("window", () => {
+  const overlay = (): HTMLElement => root().querySelector(".overlay") as HTMLElement;
+  const opened: string[] = [];
+  beforeEach(() => {
+    opened.length = 0;
+    setDiffWindowOpener(async (id) => { opened.push(id); });
+  });
+  afterEach(async () => {
+    await handleDiffWindowRequest({ kind: "closed" });
+    setDiffWindowOpener(null);
+    closeDiffOverlay();
+  });
+
+  test("Maximize opens the diff in its own window, with the entry the overlay shows, and closes the overlay", async () => {
+    showDiffOverlay(sourceOf(FILES), { select: "objects/sheets/s1.json", title: "Local changes" });
+    expect(button("Maximize")!.textContent).toBe("□");
+    click("Main");
+    await waitFor(() => expect(root().querySelectorAll(".removed").length).toBe(1));
+    click("Maximize");
+    await waitFor(() => expect(host()).toBeNull());
+    expect(opened).toHaveLength(1);
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[0]! })).toEqual({
+      ok: true, value: { title: "Local changes", select: "data_load_script/Main.qvs", repo: "lr-bicc/sales", entries },
+    });
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "data_load_script/Main.qvs" })).toEqual({
+      ok: true, value: { before: { text: "a\nb" }, after: { text: "a\nc" } },
+    });
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "objects/sheets/s1.json" })).toEqual({
+      ok: true, value: { before: null, after: { text: "{}" } },
+    });
+  });
+
+  test("binary content travels as Base64; a contents error keeps its code", async () => {
+    const source = sourceOf({
+      "data_load_script/Main.qvs": { before: new Uint8Array([1, 2, 3]), after: null },
+      "objects/sheets/s1.json": new FlowError("repo-not-found", "x"),
+    });
+    showDiffOverlay(source, { title: "t" });
+    click("Maximize");
+    await waitFor(() => expect(opened).toHaveLength(1));
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "data_load_script/Main.qvs" })).toEqual({
+      ok: true, value: { before: { base64: "AQID" }, after: null },
+    });
+    expect(await handleDiffWindowRequest({ kind: "contents", id: opened[0]!, path: "objects/sheets/s1.json" })).toEqual({
+      ok: false, error: { code: "repo-not-found", message: "x" },
+    });
+  });
+
+  test("while the window is open, further diffs go to it; once it is closed, to the page again", async () => {
+    showDiffOverlay(sourceOf(FILES), { title: "first" });
+    click("Maximize");
+    await waitFor(() => expect(opened).toHaveLength(1));
+
+    showDiffOverlay(sourceOf(FILES), { title: "second", select: "data_load_script/Main.qvs" });
+    await waitFor(() => expect(opened).toHaveLength(2));
+    expect(host()).toBeNull();
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[1]! })).toMatchObject({ ok: true, value: { title: "second" } });
+    // The window shows only the latest diff: an older one is gone.
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[0]! })).toMatchObject({ ok: false, error: { code: "diff-gone" } });
+
+    expect(await handleDiffWindowRequest({ kind: "closed" })).toEqual({ ok: true, value: null });
+    showDiffOverlay(sourceOf(FILES), { title: "third" });
+    expect(host()).not.toBeNull();
+    expect(opened).toHaveLength(2);
+    expect(await handleDiffWindowRequest({ kind: "entries", id: opened[1]! })).toMatchObject({ ok: false, error: { code: "diff-gone" } });
+  });
+
+  test("where no window can be opened, Maximize fills the page and Restore brings back the frame", async () => {
+    setDiffWindowOpener(async () => { throw new Error("windows.create failed"); });
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    click("Maximize");
+    await waitFor(() => expect(overlay().classList.contains("max")).toBe(true));
+    expect(host()).not.toBeNull();
+    click("Restore");
+    await waitFor(() => expect(overlay().classList.contains("max")).toBe(false));
+    // A failed window does not count as open: the next diff comes into the page.
+    closeDiffOverlay();
+    showDiffOverlay(sourceOf(FILES), { title: "again" });
+    expect(host()).not.toBeNull();
+  });
+
+  test("Esc closes the overlay", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(host()).toBeNull();
+  });
+
+  const at = (left: number, top: number, width: number, height: number) => () =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  const pointer = (target: EventTarget, type: string, x: number, y: number): void => {
+    target.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, button: 0 }));
+  };
+  const frame = (): string[] => ["left", "top", "width", "height"].map((k) => overlay().style.getPropertyValue(k));
+
+  test("the window opens at 80 % of the page, centred, so it can be moved at once", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    const w = Math.round(innerWidth * 0.8);
+    const h = Math.round(innerHeight * 0.8);
+    expect(frame()).toEqual([`${Math.round((innerWidth - w) / 2)}px`, `${Math.round((innerHeight - h) / 2)}px`, `${w}px`, `${h}px`]);
+  });
+
+  test("the title bar moves the window; its buttons do not", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    const opened = frame();
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    pointer(button("Close")!, "pointerdown", 900, 30);
+    pointer(document, "pointermove", 950, 80);
+    pointer(document, "pointerup", 950, 80);
+    expect(frame()).toEqual(opened);
+
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", 150, 80);
+    pointer(document, "pointerup", 150, 80);
+    expect(frame()).toEqual(["74px", "74px", "800px", "600px"]);
+    pointer(document, "pointermove", 500, 500); // after the release nothing moves
+    expect(frame()).toEqual(["74px", "74px", "800px", "600px"]);
+  });
+
+  test("the whole window stays on the page, also on the side of the side panel", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", -2000, -2000);
+    expect(frame()).toEqual(["0px", "0px", "800px", "600px"]);
+    pointer(document, "pointermove", 5000, 5000);
+    pointer(document, "pointerup", 5000, 5000);
+    expect(frame()).toEqual([`${innerWidth - 800}px`, `${innerHeight - 600}px`, "800px", "600px"]);
+  });
+
+  test("the corner resizes the window, not below a minimum", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    const grip = root().querySelector(".grip")!;
+    pointer(grip, "pointerdown", 824, 624);
+    pointer(document, "pointermove", 900, 700);
+    expect(frame()).toEqual(["24px", "24px", "876px", "676px"]);
+    pointer(document, "pointermove", 5000, 5000);
+    expect(frame()).toEqual(["24px", "24px", `${innerWidth - 24}px`, `${innerHeight - 24}px`]);
+    pointer(document, "pointermove", 0, 0);
+    pointer(document, "pointerup", 0, 0);
+    expect(frame()).toEqual(["24px", "24px", "480px", "240px"]);
+  });
+
+  test("when the page narrows (side panel opens), the window moves back into view", async () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 400, 300);
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", 5000, 100);
+    pointer(document, "pointerup", 5000, 100);
+    expect(frame()[0]).toBe(`${innerWidth - 400}px`);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // effects run after the first paint
+    const wide = innerWidth;
+    (window as unknown as { happyDOM: { setInnerWidth(w: number): void } }).happyDOM.setInnerWidth(wide - 300);
+    window.dispatchEvent(new Event("resize"));
+    try {
+      await waitFor(() => expect(frame()[0]).toBe(`${wide - 300 - 400}px`));
+    } finally {
+      (window as unknown as { happyDOM: { setInnerWidth(w: number): void } }).happyDOM.setInnerWidth(wide);
+    }
+  });
+
+  test("position and size hold for the next window in the tab", () => {
+    showDiffOverlay(sourceOf(FILES), { title: "t" });
+    overlay().getBoundingClientRect = at(24, 24, 800, 600);
+    pointer(root().querySelector("header")!, "pointerdown", 100, 30);
+    pointer(document, "pointermove", 110, 40);
+    pointer(document, "pointerup", 110, 40);
+    click("Close");
+    showDiffOverlay(sourceOf(FILES), { title: "again" });
+    expect(frame()).toEqual(["34px", "34px", "800px", "600px"]);
+  });
 });

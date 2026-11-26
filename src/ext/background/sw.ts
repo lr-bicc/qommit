@@ -1,6 +1,7 @@
 // Qommit service worker: the only place that knows the GitHub token.
 import type { GatewayRequest, GatewayResponse } from "../shared/github-port";
 import { loadOptions, loadToken } from "../shared/options";
+import { wireDiffWindow } from "./diff-window";
 import { handleGateway } from "./gateway";
 import { wireSidePanel } from "./side-panel";
 
@@ -22,3 +23,6 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   void handleGateway(m.request as GatewayRequest, { loadOptions, loadToken, fetch: (input, init) => fetch(input, init) }).then(sendResponse);
   return true;
 });
+
+// After the gateway: "Maximize" in the diff overlay opens the diff in its own window.
+wireDiffWindow();
