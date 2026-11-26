@@ -50,9 +50,9 @@ Qommit läuft bisher als entpackte Extension im Entwicklermodus. Die erste produ
 5. **Release-Anleitung.** `docs/release.md`: Version im Manifest erhöhen (für v1.0.0: `1.0.0`), PR mergen, Tag setzen und pushen, Workflow abwarten, Zip im Store hochladen; einmalig vor v1.0.0: Repo öffentlich schalten, Pages auf `gh-pages` einstellen, URL prüfen. Umstieg der Nutzer: entpackte Version entfernen, Store-Version installieren, Token und Server neu eintragen (andere Extension-ID).
 6. **Öffentliche Dateien.** `README.md` (was Qommit tut, Installation aus dem Store, Entwicklung: `npm ci`, `npm test`, `npm run build:ext`, Link zur Datenschutzerklärung) und `LICENSE` (MIT).
 
-## Offen (Nutzer)
+## Entschieden nach Durchsicht
 
-- Inhaber im MIT-Copyright-Vermerk (Firma mit genauem Namen oder Person).
+- Inhaber im MIT-Copyright-Vermerk: Rumen Vasilev (`Copyright (c) 2026 Rumen Vasilev`).
 
 ## Dem Umsetzer überlassen
 
