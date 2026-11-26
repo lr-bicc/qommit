@@ -7,7 +7,8 @@ const read = (file: string): string => readFileSync(join(root, file), "utf8");
 describe("public files", () => {
   test("public texts name nothing internal", () => {
     const banned = ["lrworld", "lr-analytics", "LR\\", "R.Vasilev@", "Supply Chain"];
-    for (const file of ["site/index.html", "store/listing.md", "README.md", "LICENSE", "docs/release.md", "src/ext/manifest.json"]) {
+    for (const file of ["site/index.html", "store/listing.md", "README.md", "LICENSE", "docs/release.md", "src/ext/manifest.json",
+      "docs/superpowers/acceptance/plan-2-checklist.md", "docs/superpowers/acceptance/plan-3-checklist.md"]) {
       const text = read(file).toLowerCase();
       for (const word of banned) expect(text, `${file} contains ${word}`).not.toContain(word.toLowerCase());
     }

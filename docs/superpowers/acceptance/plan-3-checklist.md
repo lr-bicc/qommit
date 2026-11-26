@@ -1,6 +1,6 @@
 # Abnahme-Checkliste Plan 3: Qommit-Extension, zweite Stufe
 
-Du führst diese Liste gegen den Testserver `https://lr-analytics-test.lrworld.com` aus. Hake jeden Schritt ab, wenn das erwartete Ergebnis eintritt. Weicht etwas ab, notiere den Wortlaut und mache ein Bildschirmfoto (siehe Abschnitt 5).
+Du führst diese Liste gegen deinen Qlik-Testserver aus (in den Beispielen `https://qlik.example.com`). Als **Referenz-App** dient eine veröffentlichte App, die schon in einem GitHub-Repository versioniert ist. Hake jeden Schritt ab, wenn das erwartete Ergebnis eintritt. Weicht etwas ab, notiere den Wortlaut und mache ein Bildschirmfoto (siehe Abschnitt 5).
 
 ## Was diese Version zusätzlich kann
 
@@ -9,7 +9,7 @@ Neu gegenüber Plan 2: **Update** (Stand aus GitHub in die App schreiben, mit Vo
 ## 1. Vorbereitung
 
 - [ ] **1.** Die Extension neu laden: In `chrome://extensions` bei Qommit „Neu laden“ klicken (nach `npm run build:ext` im Repo, Ergebnis in `dist/ext`). Erwartet: Qommit erscheint ohne Fehlermeldung in der Liste; Token und Server aus Plan 2 sind noch eingetragen.
-- [ ] **2.** Qlik-Seite des Testservers `lr-analytics-test.lrworld.com` neu laden und das Panel öffnen. Erwartet: Das Panel öffnet ohne Fehler.
+- [ ] **2.** Qlik-Seite des Testservers neu laden und das Panel öffnen. Erwartet: Das Panel öffnet ohne Fehler.
 
 ## 2. Update
 
@@ -25,7 +25,7 @@ Neu gegenüber Plan 2: **Update** (Stand aus GitHub in die App schreiben, mit Vo
 - [ ] **9.** Tag „acceptance-1“ mit Beschreibung auf einen Commit setzen. Erwartet: Er ist im Reiter „Tags“ sichtbar und auf GitHub ein annotiertes Tag. Derselbe Name noch einmal ergibt „Tag already exists.“
 - [ ] **10.** „Update app to this tag“ wählen. Erwartet: Liegt das Tag auf dem Branch, ist `syncedSha` danach der Commit des Tags (Prüfung über die Engine); unterscheidet er sich vom Branch-HEAD nur in der README, rückt das Panel gleich auf den HEAD vor. Liegt das Tag nicht auf dem Branch, bleibt `syncedSha`, und der Stand erscheint als lokale Änderung.
 - [ ] **11.** „details“, „Diff to previous“ und „Diff to app“ wählen. Erwartet: Ein Overlay mit 80 % der Seite, mittig, mit der Liste der Änderungen (jeder Eintrag mit dem Titel seines Objekts, auch bei mehr als 100 Einträgen) und der Gegenüberstellung; Skripte zeilenweise. Das Overlay lässt sich an der Titelleiste verschieben, bleibt dabei ganz in der Seite (nicht unter dem Side Panel) und lässt sich an der Ecke rechts unten in der Größe ändern. ✕ und die Escape-Taste schließen es. □ öffnet den Diff in einem eigenen Chrome-Fenster ohne Tabs, Adressleiste und Side Panel, das den ganzen Bildschirm füllt und sich an der Titelleiste verschieben lässt; weitere Diffs erscheinen darin, bis es geschlossen wird.
-- [ ] **12.** Import von „Supply Chain Performance“ (`main`) im Hub. Erwartet: Eine neue App „Supply Chain Performance (main)“ ohne Daten. Sie mit „Connect to existing repository“ → „To existing branch“ `main` verbinden. Erwartet: „No local changes“ außer Bookmarks (Erfolgskriterium 4), auch wenn `main` noch im Format von gitoqlok vorliegt; „Save changes“ bietet dann nur „Remove files no longer maintained“ an. Danach „Unlink repository“ und die App löschen.
+- [ ] **12.** Import der Referenz-App (`main`) im Hub. Erwartet: Eine neue App „<Name der Referenz-App> (main)“ ohne Daten. Sie mit „Connect to existing repository“ → „To existing branch“ `main` verbinden. Erwartet: „No local changes“ außer Bookmarks (Erfolgskriterium 4), auch wenn `main` noch im Format von gitoqlok vorliegt; „Save changes“ bietet dann nur „Remove files no longer maintained“ an. Danach „Unlink repository“ und die App löschen.
 - [ ] **13.** Story mit Snapshots (falls eine App mit Story vorliegt): importieren und mit der Quelle vergleichen. Erwartet: Die Story zeigt dieselben Snapshots wie die Quelle, und das Panel meldet „No local changes“ (Spike-Frage 6). Eine Snapshot-ID und die Auswahl beim Aufnehmen weichen ab; das ist gewollt (Spec 4.4).
 
 ## 4. Veröffentlichte Apps und Ende zu Ende
@@ -37,6 +37,6 @@ Neu gegenüber Plan 2: **Update** (Stand aus GitHub in die App schreiben, mit Vo
 
 Bitte melde zurück:
 
-- [ ] Wie lange Vorschau und Update bei „Supply Chain Performance“ gedauert haben (Sekunden).
+- [ ] Wie lange Vorschau und Update bei der Referenz-App gedauert haben (Sekunden).
 - [ ] Alle Fehlermeldungen im Wortlaut, mit Bildschirmfoto.
 - [ ] Welche Schritte oben nicht wie erwartet liefen (Nummer und Abweichung).
