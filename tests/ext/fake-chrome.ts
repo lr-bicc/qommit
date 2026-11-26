@@ -23,6 +23,7 @@ export interface FakeChrome {
   respond: (message: any) => unknown; // answer for runtime.sendMessage / tabs.sendMessage
   tabs: { id?: number; url?: string; active?: boolean; windowId?: number }[]; // result of chrome.tabs.query
   windows: { id: number; url: string; type?: string; state?: string; focused?: boolean; left?: number; top?: number; width?: number; height?: number }[]; // open windows
+  currentWindowId: number; // answer of chrome.windows.getCurrent: the window the calling page (side panel) belongs to
   tabMessages: { tabId: number; message: unknown }[];
   injected: { tabId: number; files: string[] }[]; // chrome.scripting.executeScript calls
   panelOptions: unknown[]; // chrome.sidePanel.setOptions calls
@@ -33,6 +34,8 @@ export interface FakeChrome {
   emitTabRemoved(tabId: number): void; // fires tabs.onRemoved listeners
   emitInstalled(details?: unknown): void; // fires runtime.onInstalled listeners
   emitTabUpdated(tabId: number, changeInfo: unknown, tab?: unknown): void; // fires tabs.onUpdated listeners
+  emitTabActivated(tabId: number, windowId: number): void; // fires tabs.onActivated listeners
+  emitTabCreated(tab: { id?: number; url?: string; windowId?: number }): void; // fires tabs.onCreated listeners
 }
 
 export function installFakeChrome(): FakeChrome {
@@ -42,6 +45,8 @@ export function installFakeChrome(): FakeChrome {
   const onUpdated = eventTarget();
   const onWindowRemoved = eventTarget();
   const onTabRemoved = eventTarget();
+  const onTabActivated = eventTarget();
+  const onTabCreated = eventTarget();
   let nextWindowId = 1;
 
   const fake: FakeChrome = {
@@ -55,6 +60,7 @@ export function installFakeChrome(): FakeChrome {
     respond: () => undefined,
     tabs: [],
     windows: [],
+    currentWindowId: 1,
     tabMessages: [],
     injected: [],
     panelOptions: [],
@@ -75,6 +81,14 @@ export function installFakeChrome(): FakeChrome {
     },
     emitTabUpdated(tabId, changeInfo, tab = { id: tabId }) {
       for (const fn of [...onUpdated.listeners]) fn(tabId, changeInfo, tab);
+    },
+    emitTabActivated(tabId, windowId) {
+      for (const tab of fake.tabs) if (tab.windowId === windowId) tab.active = tab.id === tabId;
+      for (const fn of [...onTabActivated.listeners]) fn({ tabId, windowId });
+    },
+    emitTabCreated(tab) {
+      fake.tabs.push(tab);
+      for (const fn of [...onTabCreated.listeners]) fn(clone(tab));
     },
   };
 
@@ -152,8 +166,10 @@ export function installFakeChrome(): FakeChrome {
         fake.tabMessages.push({ tabId, message: sent });
         return answer(sent);
       },
-      async query(info: { windowId?: number } = {}) {
-        return clone(fake.tabs.filter((t) => info.windowId === undefined || t.windowId === info.windowId));
+      async query(info: { windowId?: number; active?: boolean; currentWindow?: boolean } = {}) {
+        const windowId = info.currentWindow ? fake.currentWindowId : info.windowId;
+        return clone(fake.tabs.filter((t) => (windowId === undefined || t.windowId === windowId)
+          && (info.active === undefined || (t.active ?? false) === info.active)));
       },
       async update(tabId: number, props: { url?: string }) {
         const tab = fake.tabs.find((t) => t.id === tabId);
@@ -172,6 +188,8 @@ export function installFakeChrome(): FakeChrome {
         return clone(tab);
       },
       onUpdated,
+      onActivated: onTabActivated,
+      onCreated: onTabCreated,
     },
     scripting: {
       async executeScript(injection: { target: { tabId: number }; files?: string[] }) {
@@ -199,6 +217,9 @@ export function installFakeChrome(): FakeChrome {
         fake.windows.splice(at, 1);
         fake.tabs = fake.tabs.filter((t) => t.windowId !== windowId);
         fake.emitWindowRemoved(windowId);
+      },
+      async getCurrent() {
+        return { id: fake.currentWindowId };
       },
       onRemoved: onWindowRemoved,
     },
