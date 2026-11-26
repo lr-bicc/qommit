@@ -1,6 +1,6 @@
 # Chrome Web Store listing
 
-Values to enter in the Developer Dashboard. The screenshots (1280 x 800) are taken by hand and uploaded there; the small promo tile is `store/promo-small-440x280.png`.
+Values to enter in the Developer Dashboard. The screenshots (1280 x 800) are in `store/screenshots/`; the small promo tile is `store/promo-small-440x280.png`.
 
 ## Store listing
 
@@ -53,4 +53,11 @@ You need a GitHub token and a GitHub organization. Qommit stores them only in yo
 
 ## Screenshots
 
-Take 1280 x 800 screenshots of the side panel (history, diff, commit) on a demo app. Do not show real server names or app names.
+Upload these four, in this order (each 1280 x 800):
+
+1. `store/screenshots/1-history.png`: the History tab with commits and tags.
+2. `store/screenshots/2-diff.png`: the diff of the local changes over the page.
+3. `store/screenshots/3-commit.png`: choosing what to save, with a commit message.
+4. `store/screenshots/4-update.png`: updating the app to an earlier commit.
+
+They show the real side panel with demo data: the app "Sales Overview", the repository `acme-analytics/sales-overview` and the server `qlik.example.com`. New screenshots must not show real server names or app names either.
