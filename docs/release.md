@@ -26,31 +26,36 @@
 
 The source is `site/index.html` on `main`, so changes go through a pull request. The `gh-pages` branch holds only `index.html`. After a change is merged, copy the file over.
 
-First time (orphan branch in a temporary worktree):
+The commands below run in Git Bash and in Windows PowerShell. They use `git -C` instead of `cd`. If a previous run left a `../qommit-pages` folder behind, run `git worktree prune`, and delete the folder if it is still there.
+
+First publication: the release preparation already created the local `gh-pages` branch. Check that it matches the source, then push it:
+
+```
+git show gh-pages:index.html
+git push origin gh-pages
+```
+
+The `git show` line prints the page; compare it with `site/index.html`. If the local branch is missing (`git branch --list gh-pages` prints nothing), create it as an orphan branch in a temporary worktree, then push it:
 
 ```
 git worktree add --detach ../qommit-pages main
-cd ../qommit-pages
-git checkout --orphan gh-pages
-git rm -rf .
-git checkout main -- site/index.html
-git mv site/index.html index.html
-git commit -m "Privacy page"
-git push origin gh-pages
-cd -
+git -C ../qommit-pages checkout --orphan gh-pages
+git -C ../qommit-pages rm -rf .
+git -C ../qommit-pages checkout main -- site/index.html
+git -C ../qommit-pages mv site/index.html index.html
+git -C ../qommit-pages commit -m "Privacy page"
 git worktree remove --force ../qommit-pages
+git push origin gh-pages
 ```
 
 Later changes:
 
 ```
 git worktree add ../qommit-pages gh-pages
-cd ../qommit-pages
-git checkout main -- site/index.html
-git mv -f site/index.html index.html
-git commit -am "Update privacy page"
+git -C ../qommit-pages checkout main -- site/index.html
+git -C ../qommit-pages mv -f site/index.html index.html
+git -C ../qommit-pages commit -am "Update privacy page"
 git push origin gh-pages
-cd -
 git worktree remove ../qommit-pages
 ```
 
