@@ -278,9 +278,7 @@ Im Hub oder in einer App: Repo, Branch und Commit oder Tag wählen → auf dem S
 
 ## 9. Spike vor der Umsetzung
 
-**Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft). Frage 6 hat die Abnahme von Plan 3 beantwortet: nein, Snapshots gehen verloren; sie werden seitdem eigens eingebettet (Abschnitt 4.4).
-
-**Für Plan 3:** Beide offenen Punkte prüft die Abnahme von Plan 3 (`docs/superpowers/acceptance/plan-3-checklist.md`, Schritte 13 und 6): Import und Vergleich einer App mit Story (Frage 6), Skript nach „Load script“ und Daten nach `DoSave` (Frage 7, Skriptteil).
+**Abgeschlossen am 2026-11-13.** Ergebnisse: `docs/superpowers/spike/results.md`. Alle Fragen sind positiv beantwortet, bis auf Frage 6 (offen, die Test-App hat keine Story) und einen Teil von Frage 7 (`DoSave` nach einer Skriptänderung ist nicht geprüft). Beide hat die Abnahme von Plan 3 beantwortet (`docs/superpowers/acceptance/plan-3-checklist.md`, Schritte 13 und 6). Frage 6: nein, Snapshots gehen verloren; sie werden seitdem eigens eingebettet (Abschnitt 4.4). Frage 7, Skriptteil: ja. Nach „Load script“ stand das Skript auf dem Zielstand, und nach dem `DoSave` und anschließendem Neuladen hatte die App ihre Daten (9 Tabellen, rund 4,1 Mio. Zeilen); auch nach dem vollständigen Update in Schritt 7 behielt sie ihre Daten.
 
 Mehrere Annahmen lassen sich nur am echten Server prüfen. Der erste Schritt des Implementierungsplans ist ein kurzer Spike gegen den Testserver, dessen Code nicht übernommen wird:
 
