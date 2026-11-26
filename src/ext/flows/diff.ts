@@ -64,16 +64,17 @@ export async function openDiff(
   const titleSide = (kind: ChangeKind): SideState => (kind === "deleted" ? b : a);
   const titled = (path: string, kind: ChangeKind) => ({ path, state: titleSide(kind) });
 
-  // One readBlobs call preloads the title side of the first MAX_BLOBS_PER_CALL downloadable JSON/.qvs entries.
+  // The title side of every downloadable JSON/.qvs entry is read up front, MAX_BLOBS_PER_CALL per call: every entry
+  // shows its object's title. The content is kept, so showing the entry needs no second download.
   const preload = changes
     .map((c) => titled(c.path, c.kind))
     .filter(({ path, state }) => state.local === null && (path.endsWith(".json") || path.endsWith(".qvs")))
-    .slice(0, MAX_BLOBS_PER_CALL)
     .map(({ path, state }) => ({ path, sha: state.tree!.get(path)! }));
   const known = new Map<string, FileContent>(); // title-side content available without a further download
-  if (preload.length > 0) {
-    const loaded = await ports.github.readBlobs(repo, preload);
-    for (const { path, sha } of preload) {
+  for (let i = 0; i < preload.length; i += MAX_BLOBS_PER_CALL) {
+    const chunk = preload.slice(i, i + MAX_BLOBS_PER_CALL);
+    const loaded = await ports.github.readBlobs(repo, chunk);
+    for (const { path, sha } of chunk) {
       const content = loaded.get(path);
       if (content === undefined) continue;
       known.set(path, content);
