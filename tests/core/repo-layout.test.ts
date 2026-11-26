@@ -2,7 +2,7 @@ import { repoSlug, repoSlugWithId, parseBranchTable, upsertBranchRow, canonicalA
   from "../../src/core/repo-layout";
 
 test("slugs", () => {
-  expect(repoSlug("Supply Chain Performance")).toBe("supply-chain-performance");
+  expect(repoSlug("Sales Overview")).toBe("sales-overview");
   expect(repoSlug("Umsätze & Bestände (DE)")).toBe("umsaetze-bestaende-de");
   expect(repoSlug("Café  Größe", "qlik-")).toBe("qlik-cafe-groesse");
   expect(repoSlug("Продажби")).toBe("app");

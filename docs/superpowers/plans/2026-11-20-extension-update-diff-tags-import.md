@@ -980,7 +980,7 @@ Abschnitt 6.6 Schritt 1 und Abschnitt 9 („Für Plan 3“) entsprechend anpasse
 
 - [ ] **Step 4: Abnahme-Checkliste `docs/superpowers/acceptance/plan-3-checklist.md`**
 
-Aufbau wie `plan-2-checklist.md` (Vorbereitung: Extension neu laden; Testserver `lr-analytics-test.lrworld.com`). Punkte, je mit „Erwartet:“:
+Aufbau wie `plan-2-checklist.md` (Vorbereitung: Extension neu laden; Testserver `qlik.example.com`). Punkte, je mit „Erwartet:“:
 1. Kopie einer versionierten App, die hinter `main` steht: „Update (N)“ → Vorschau → Update → „Success“; danach „No local changes“, kein Hinweis auf neue Commits.
 2. Dieselbe Kopie mit einer lokalen Änderung (ein Sheet umbenennen) auf einen älteren Commit aktualisieren: Sicherungs-Branch `backup/<branch>-…` auf GitHub mit dem Commit „Backup before update to …“; Panel meldet „Repository has N new commits“.
 3. In der Commit-Auswahl den Sicherungs-Branch wählen und auf seinen Commit aktualisieren. Erwartet: Das umbenannte Sheet ist zurück; es erscheint als lokale Änderung, weil der Sicherungs-Branch nicht auf dem Branch der App liegt (`syncedSha` bleibt).
@@ -988,12 +988,12 @@ Aufbau wie `plan-2-checklist.md` (Vorbereitung: Extension neu laden; Testserver 
 5. Tag „acceptance-1“ mit Beschreibung auf einen Commit setzen; im Reiter „Tags“ sichtbar, auf GitHub als annotiertes Tag; derselbe Name noch einmal → „Tag already exists.“
 6. „Update app to this tag“: `syncedSha` bleibt (Prüfung über die Engine), der Stand erscheint als lokale Änderung, falls das Tag nicht auf dem Branch liegt.
 7. „details“, „Diff to previous“, „Diff to app“: Overlay mit Liste und Gegenüberstellung; Skript zeilenweise; „Close“ und Escape schließen.
-8. Import von „Supply Chain Performance“ (`main`) im Hub: neue App „Supply Chain Performance (main)“ ohne Daten; mit „Connect to existing repository“ → „To existing branch“ `main` verbinden → „No local changes“ außer Bookmarks (Erfolgskriterium 4). Danach Unlink und App löschen.
+8. Import von „Sales Overview“ (`main`) im Hub: neue App „Sales Overview (main)“ ohne Daten; mit „Connect to existing repository“ → „To existing branch“ `main` verbinden → „No local changes“ außer Bookmarks (Erfolgskriterium 4). Danach Unlink und App löschen.
 9. Story mit Snapshots (falls eine App mit Story vorliegt): Import und Vergleich (Spike-Frage 6).
 10. Abgebrochenes Update: während eines Updates den Tab neu laden → Hinweis „The last update did not finish …“; erneutes Update entfernt ihn.
 11. Veröffentlichte App: kein „Update“, keine „Update …“-Aktionen; „Diff to app“ und „Add tag“ vorhanden.
 12. Ende zu Ende (Erfolgskriterium 2): Kopie → Create Branch → ändern → Save changes → PR auf GitHub mergen → in der QMC „Publish and replace“ → veröffentlichte App zeigt „Published from commit“ mit dem Merge-Commit und „No local changes“.
-13. Rückmeldung: Dauer von Vorschau und Update bei „Supply Chain Performance“, Fehlermeldungen im Wortlaut.
+13. Rückmeldung: Dauer von Vorschau und Update bei „Sales Overview“, Fehlermeldungen im Wortlaut.
 
 - [ ] **Step 5: Full check and build**
 

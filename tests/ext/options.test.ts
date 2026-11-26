@@ -2,8 +2,8 @@ import { DEFAULT_OPTIONS, loadOptions, normalizeServer, saveOptions, saveToken }
 import { installFakeChrome } from "./fake-chrome";
 
 test("normalizeServer keeps only an https origin", () => {
-  expect(normalizeServer(" lr-analytics-test.lrworld.com ")).toBe("https://lr-analytics-test.lrworld.com");
-  expect(normalizeServer("https://lr-analytics-test.lrworld.com/qs/hub/")).toBe("https://lr-analytics-test.lrworld.com");
+  expect(normalizeServer(" qlik.example.com ")).toBe("https://qlik.example.com");
+  expect(normalizeServer("https://qlik.example.com/qs/hub/")).toBe("https://qlik.example.com");
   expect(normalizeServer("https://host:4443/x")).toBe("https://host:4443");
   expect(normalizeServer("http://host")).toBeNull();
   expect(normalizeServer("")).toBeNull();

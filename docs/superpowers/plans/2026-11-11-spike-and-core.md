@@ -150,7 +150,7 @@ Wegwerf-Code. Ergebnis ist `docs/superpowers/spike/results.md`, nicht der Code. 
 **Interfaces:**
 - Produces: JSON-Bericht `{ server, appId, startedAt, probes: [{ id, question, ok, detail, evidence }] }`, heruntergeladen als `spike-report-<timestamp>.json`.
 
-- [ ] **Step 1: Extension-Hülle.** `spike/manifest.json` (Manifest V3, Name „Qommit Spike“, `content_scripts` für `https://lr-analytics-test.lrworld.com/*`, `js: ["dist/content.js"]`, `run_at: document_idle`, keine weiteren Berechtigungen). `spike/build.mjs` bündelt `spike/src/content.ts` mit esbuild nach `spike/dist/content.js` (IIFE). Das Content Script blendet auf App-Seiten (`/sense/app/<id>`) unten links einen Button „Run spike probes“ ein, der `runProbes()` ausführt und den Bericht als Datei herunterlädt.
+- [ ] **Step 1: Extension-Hülle.** `spike/manifest.json` (Manifest V3, Name „Qommit Spike“, `content_scripts` für `https://qlik.example.com/*`, `js: ["dist/content.js"]`, `run_at: document_idle`, keine weiteren Berechtigungen). `spike/build.mjs` bündelt `spike/src/content.ts` mit esbuild nach `spike/dist/content.js` (IIFE). Das Content Script blendet auf App-Seiten (`/sense/app/<id>`) unten links einen Button „Run spike probes“ ein, der `runProbes()` ausführt und den Bericht als Datei herunterlädt.
 
 - [ ] **Step 2: Probes in `spike/src/probes.ts`.** Jede Probe fängt Fehler ab und schreibt `ok`, `detail` und `evidence`. Alle angelegten Objekte tragen IDs mit Präfix `spike-` und werden am Ende wieder gelöscht. URL-Bestandteile (Host, Virtual-Proxy-Präfix, App-ID) werden aus `location` abgeleitet.
 
@@ -169,7 +169,7 @@ Wegwerf-Code. Ergebnis ist `docs/superpowers/spike/results.md`, nicht der Code. 
 
 - [ ] **Step 3: Runbook `docs/superpowers/spike/RUNBOOK.md` schreiben.** Inhalt, in dieser Reihenfolge:
   1. `node spike/build.mjs`, dann `chrome://extensions` → Entwicklermodus → „Entpackte Erweiterung laden“ → Ordner `spike/`.
-  2. Eine veröffentlichte, mit gitoqlok versionierte App im Hub duplizieren (z. B. „Supply Chain Performance“), Kopie öffnen, „Run spike probes“ klicken, Bericht speichern (**Bericht A**).
+  2. Eine veröffentlichte, mit gitoqlok versionierte App im Hub duplizieren (z. B. „Sales Overview“), Kopie öffnen, „Run spike probes“ klicken, Bericht speichern (**Bericht A**).
   3. Seite der ersten Kopie neu laden und Probes erneut ausführen (**Bericht A2**): `existedBefore` zeigt, ob das Link-Objekt ohne eigenes Speichern erhalten blieb. Dann die Kopie im Hub duplizieren, zweite Kopie öffnen, Probes ausführen (**Bericht B**): `existedBefore` zeigt, ob das Link-Objekt mitkopiert wurde.
   4. Eine Wegwerf-App in einen Test-Stream veröffentlichen, dann die erste Kopie in der QMC per „Publish and replace“ darüberlegen, die veröffentlichte App öffnen, Probes ausführen (**Bericht C**). `existedBefore` beantwortet Frage 9 (Link-Objekt nach „Publish and replace“); P8 beantwortet Frage 8.
   5. Im Hub prüfen, ob das Objekt `spike-qommit-link` irgendwo in der Oberfläche sichtbar ist (Sheets, Master Items, Bookmarks).
@@ -607,7 +607,7 @@ import { repoSlug, repoSlugWithId, parseBranchTable, upsertBranchRow, canonicalA
   from "../../src/core/repo-layout";
 
 test("slugs", () => {
-  expect(repoSlug("Supply Chain Performance")).toBe("supply-chain-performance");
+  expect(repoSlug("Sales Overview")).toBe("sales-overview");
   expect(repoSlug("Umsätze & Bestände (DE)")).toBe("umsaetze-bestaende-de");
   expect(repoSlug("Café  Größe", "qlik-")).toBe("qlik-cafe-groesse");
   expect(repoSlug("Продажби")).toBe("app");

@@ -1,6 +1,6 @@
 # Runbook: Spike gegen den Qlik-Testserver
 
-Wegwerf-Extension „Qommit Spike“. Sie blendet auf App-Seiten von `https://lr-analytics-test.lrworld.com` unten links den Button **„Run spike probes“** und daneben zwei Checkboxen ein:
+Wegwerf-Extension „Qommit Spike“. Sie blendet auf App-Seiten von `https://qlik.example.com` unten links den Button **„Run spike probes“** und daneben zwei Checkboxen ein:
 
 - **„Include DoSave probe (P7)“** – standardmäßig **nicht** angehakt. Ohne Haken wird P7 als „skipped: DoSave probe not selected“ berichtet.
 - **„Include new-app probe (P9)“** – standardmäßig **angehakt**. Ohne Haken wird P9 als „skipped: new-app probe not selected“ berichtet.
@@ -25,11 +25,11 @@ P1, P4, P6, P8, P10 und P11 lesen nur.
 
 1. Im Repo-Wurzelverzeichnis: `npm install` (falls noch nicht geschehen), dann `node spike/build.mjs`. Danach muss `spike/dist/content.js` existieren.
 2. In Chrome `chrome://extensions` öffnen → oben rechts **Entwicklermodus** einschalten → **„Entpackte Erweiterung laden“** → den Ordner `spike/` wählen (den Ordner, in dem `manifest.json` liegt).
-3. Die Extension braucht keine Berechtigungen. Sie läuft nur auf `https://lr-analytics-test.lrworld.com/*`.
+3. Die Extension braucht keine Berechtigungen. Sie läuft nur auf `https://qlik.example.com/*`.
 
 ## 2. Bericht A: Kopie 1 einer versionierten App
 
-1. Im Hub eine veröffentlichte, mit gitoqlok versionierte App duplizieren (z. B. „Supply Chain Performance“). Das ist **Kopie 1**.
+1. Im Hub eine veröffentlichte, mit gitoqlok versionierte App duplizieren (z. B. „Sales Overview“). Das ist **Kopie 1**.
 2. Kopie 1 öffnen (App-Übersicht oder ein Sheet). Unten links erscheint „Run spike probes“. Falls nicht: Seite neu laden.
 3. **Checkbox „Include DoSave probe (P7)“ NICHT anhaken** (Standard). „Include new-app probe (P9)“ angehakt lassen (Standard).
 4. Auf „Run spike probes“ klicken und warten, bis der Button „Done: …“ zeigt. Im Bericht muss `"includeDoSave": false` stehen.

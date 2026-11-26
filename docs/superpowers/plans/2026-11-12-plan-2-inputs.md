@@ -33,4 +33,4 @@ Stand nach Abschluss von Plan 1 (`2026-11-11-spike-and-core.md`), Branch `feat/s
 
 ## Bereits geprüft
 
-Das Referenz-Repo `lr-bicc/supply-chain-performance` (806 Dateien) besteht `validateTarget` ohne Befund. `deserializeApp` → `serializeApp` schreibt 443 Dateien, alle bytegleich mit dem Repo. Nicht geschrieben werden wie in Spec 4.5 festgelegt: skript-erzeugte Variablen, `loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json`, `builds/`.
+Das Referenz-Repo `lr-bicc/sales-overview` (806 Dateien) besteht `validateTarget` ohne Befund. `deserializeApp` → `serializeApp` schreibt 443 Dateien, alle bytegleich mit dem Repo. Nicht geschrieben werden wie in Spec 4.5 festgelegt: skript-erzeugte Variablen, `loadScript.qvs`, `fields.json`, `themes.json`, `glossarylinks.json`, `builds/`.

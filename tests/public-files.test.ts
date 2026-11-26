@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -5,10 +6,16 @@ const root = join(import.meta.dirname, "..");
 const read = (file: string): string => readFileSync(join(root, file), "utf8");
 
 describe("public files", () => {
-  test("public texts name nothing internal", () => {
-    const banned = ["lrworld", "lr-analytics", "LR\\", "R.Vasilev@", "Supply Chain"];
-    for (const file of ["site/index.html", "store/listing.md", "README.md", "LICENSE", "docs/release.md", "src/ext/manifest.json",
-      "docs/superpowers/acceptance/plan-2-checklist.md", "docs/superpowers/acceptance/plan-3-checklist.md"]) {
+  test("no tracked file names anything internal", () => {
+    const banned = ["lrworld", "lr-analytics", "LR\\", "R.Vasilev@", "Supply Chain", "supply-chain"];
+    // These two spell out the banned words themselves.
+    const exempt = new Set(["tests/public-files.test.ts", "docs/superpowers/plans/2026-11-26-store-release.md"]);
+    const files = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
+      .split("\n")
+      .filter((file) => /\.(md|ts|tsx|mjs|mts|json|html|css|yml|svg)$|^LICENSE$/.test(file) && file !== "package-lock.json" && !exempt.has(file));
+    expect(files).toContain("README.md");
+    expect(files).toContain("spike/manifest.json");
+    for (const file of files) {
       const text = read(file).toLowerCase();
       for (const word of banned) expect(text, `${file} contains ${word}`).not.toContain(word.toLowerCase());
     }

@@ -229,8 +229,8 @@ Die Attrappe deckt ab: `storage.local.get/set/remove`, `storage.onChanged`, `per
 ```ts
 // tests/ext/options.test.ts
 test("normalizeServer keeps only an https origin", () => {
-  expect(normalizeServer(" lr-analytics-test.lrworld.com ")).toBe("https://lr-analytics-test.lrworld.com");
-  expect(normalizeServer("https://lr-analytics-test.lrworld.com/qs/hub/")).toBe("https://lr-analytics-test.lrworld.com");
+  expect(normalizeServer(" qlik.example.com ")).toBe("https://qlik.example.com");
+  expect(normalizeServer("https://qlik.example.com/qs/hub/")).toBe("https://qlik.example.com");
   expect(normalizeServer("https://host:4443/x")).toBe("https://host:4443");
   expect(normalizeServer("http://host")).toBeNull();
   expect(normalizeServer("")).toBeNull();
@@ -386,8 +386,8 @@ Festlegungen: Der Pfad einer App-Seite ist `<prefix>/sense/app/<appId>[/…]`, d
 // tests/qlik/location.test.ts
 test("parses app and hub urls with and without a virtual proxy", () => {
   const id = "0a15fa01-ba63-45e6-aa3d-e060205e8344";
-  expect(parseQlikUrl(`https://lr-analytics-test.lrworld.com/qs/sense/app/${id}/sheet/abc/state/analysis`))
-    .toEqual({ origin: "https://lr-analytics-test.lrworld.com", prefix: "/qs", appId: id });
+  expect(parseQlikUrl(`https://qlik.example.com/qs/sense/app/${id}/sheet/abc/state/analysis`))
+    .toEqual({ origin: "https://qlik.example.com", prefix: "/qs", appId: id });
   expect(parseQlikUrl(`https://host/sense/app/${id}`)).toEqual({ origin: "https://host", prefix: "", appId: id });
   expect(parseQlikUrl("https://host/qs/hub/stream/x")).toEqual({ origin: "https://host", prefix: "/qs", appId: null });
   expect(parseQlikUrl("https://host/qs/qmc/apps")).toBeNull();
@@ -401,7 +401,7 @@ test("builds engine and app urls", () => {
 });
 ```
 
-`tests/qlik/session.test.ts`: `fetchCsrfToken` liefert bei 204 mit Header den Wert, ohne Header `null`, bei abgelehntem `fetch` `null`, und ruft die URL `https://host/qs/qps/csrftoken` mit `credentials: "include"` auf. `openSession` mit einer `create`-Attrappe: die übergebene `url` enthält das Token; schlägt `openDoc` fehl, wird `getActiveDoc` verwendet; `user` ist `"r.vasilev"`, wenn die Attrappe `OnAuthenticationInformation` mit `{ userId: "r.vasilev", userDirectory: "LR" }` meldet; nach dem ausgelösten `closed` ist `isClosed()` `true`; wirft `open()`, endet `openSession` mit `QlikSessionError`.
+`tests/qlik/session.test.ts`: `fetchCsrfToken` liefert bei 204 mit Header den Wert, ohne Header `null`, bei abgelehntem `fetch` `null`, und ruft die URL `https://host/qs/qps/csrftoken` mit `credentials: "include"` auf. `openSession` mit einer `create`-Attrappe: die übergebene `url` enthält das Token; schlägt `openDoc` fehl, wird `getActiveDoc` verwendet; `user` ist `"r.vasilev"`, wenn die Attrappe `OnAuthenticationInformation` mit `{ userId: "r.vasilev", userDirectory: "DOMAIN" }` meldet; nach dem ausgelösten `closed` ist `isClosed()` `true`; wirft `open()`, endet `openSession` mit `QlikSessionError`.
 
 - [ ] **Step 2:** Tests laufen lassen → FAIL.
 - [ ] **Step 3: Umsetzen.**
@@ -1231,8 +1231,8 @@ test("pull request url encodes branch segments", () => {
 - [ ] **Step 2:** Test laufen lassen. Schlägt er fehl, liegt der Fehler in einer früheren Aufgabe: dort beheben, mit eigenem Test, und hier berichten.
 
 - [ ] **Step 3: Abnahme-Checkliste** `docs/superpowers/acceptance/plan-2-checklist.md` (Deutsch), mit diesen Abschnitten und je Schritt dem erwarteten Ergebnis:
-  1. **Einrichten:** `dist/ext` in `chrome://extensions` laden; Optionen: Token eintragen, „Check connection“, Server `https://lr-analytics-test.lrworld.com` hinzufügen.
-  2. **Bestehendes gitoqlok-Repo:** die veröffentlichte „Supply Chain Performance“ duplizieren, Kopie öffnen, Panel öffnen. Erwartet: Hinweis auf die Kopie einer versionierten App. „Create Branch“ mit eigenem Namen. Erwartet auf GitHub: neuer Branch, Commit „Update branches table“.
+  1. **Einrichten:** `dist/ext` in `chrome://extensions` laden; Optionen: Token eintragen, „Check connection“, Server `https://qlik.example.com` hinzufügen.
+  2. **Bestehendes gitoqlok-Repo:** die veröffentlichte „Sales Overview“ duplizieren, Kopie öffnen, Panel öffnen. Erwartet: Hinweis auf die Kopie einer versionierten App. „Create Branch“ mit eigenem Namen. Erwartet auf GitHub: neuer Branch, Commit „Update branches table“.
   3. **Local Changes der frischen Kopie.** Erwartet (Spike): 11 geänderte Sheets, 2 geänderte Dimensionen, 357 gelöschte Variablen, sonst nichts; „Remove files no longer maintained“ nennt 5 Dateien. Abweichungen bitte mit Bildschirmfoto melden.
   4. **Save changes** mit allen Einträgen. Erwartet: Commit auf dem Branch; danach „No local changes“. Seite neu laden, Daten der App neu laden: weiterhin „No local changes“ (Erfolgskriterium 3).
   5. **Änderung:** ein Measure und einen Skript-Tab ändern → genau diese zwei Einträge → nur das Measure speichern → der Skript-Tab bleibt als Änderung stehen.
