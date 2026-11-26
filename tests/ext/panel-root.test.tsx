@@ -39,6 +39,27 @@ test("adding the server in the options switches the open panel", async () => {
   await screen.findByText("Open an app to use Qommit.");
 });
 
+test("the general panel (no tab of its own) follows the active tab of its window", async () => {
+  // Chrome shows it on a tab that has no panel of its own yet, such as an app the hub just opened in a new tab.
+  chrome.currentWindowId = 1;
+  chrome.tabs = [
+    { id: 5, url: "https://qlik.example.com/qs/hub", active: true, windowId: 1 },
+    { id: 6, url: "https://other.example.com/", active: false, windowId: 1 },
+    { id: 7, url: "https://qlik.example.com/qs/hub", active: true, windowId: 2 },
+  ];
+  const made: number[] = [];
+  render(<PanelRoot tabId={null} createBridge={(id) => (made.push(id), fakeBridge({ status: [{ page: "hub" }, { page: "hub" }] }))} />);
+  await screen.findByText("Open an app to use Qommit.");
+  expect(made).toEqual([5]);
+  chrome.emitTabActivated(6, 1);
+  await screen.findByText(HINT);
+  chrome.emitTabActivated(7, 2); // another window: not this panel's tab
+  await screen.findByText(HINT);
+  chrome.emitTabActivated(5, 1);
+  await screen.findByText("Open an app to use Qommit.");
+  expect(made).toEqual([5, 5]);
+});
+
 test("without a tab, or when the tab cannot be read, the panel shows the hint", async () => {
   render(<PanelRoot tabId={null} createBridge={() => fakeBridge({})} />);
   await screen.findByText(HINT);

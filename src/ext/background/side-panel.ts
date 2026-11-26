@@ -1,5 +1,6 @@
 /**
- * Every tab gets its own panel that knows its tab. Whether the tab shows a configured Qlik server is decided by the
+ * Every tab gets its own panel that knows its tab, from its creation on. A tab without one shows the general panel
+ * (manifest `default_path`), which follows the active tab of its window (panel/active-tab.ts). Whether the tab shows a configured Qlik server is decided by the
  * panel itself (panel/tab-server.ts): Chrome does not reload an open panel when its path changes, so a panel opened
  * while the tab was on another page (such as the sign-in redirect) must notice when the tab reaches the server.
  */
@@ -27,6 +28,9 @@ export function wireSidePanel(): void {
     void openOnActionClick().catch(() => {});
   });
 
+  chrome.tabs.onCreated.addListener((tab) => {
+    if (tab.id !== undefined) void chrome.sidePanel.setOptions(panelOptionsFor(tab.id)).catch(() => {});
+  });
   chrome.tabs.onUpdated.addListener((tabId) => {
     void chrome.sidePanel.setOptions(panelOptionsFor(tabId)).catch(() => {});
   });

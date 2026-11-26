@@ -15,6 +15,7 @@ import { LocalChangesTab } from "./LocalChangesTab";
 import { SetupViews } from "./SetupViews";
 import { TagsTab } from "./TagsTab";
 import { UpdateDialog } from "./UpdateDialog";
+import { watchActiveTab } from "./active-tab";
 import { watchTabServer } from "./tab-server";
 
 type DialogKind = "connect" | "branch" | "unlink";
@@ -39,14 +40,29 @@ function repoOf(status: AppStatus): { repo: string; branch: string | null } | nu
   }
 }
 
-/** The panel of one tab: Qommit while the tab shows a configured Qlik server, the hint otherwise. */
+/**
+ * The panel of one tab: Qommit while the tab shows a configured Qlik server, the hint otherwise. Without a tab of its
+ * own (`tabId` null: the general panel) it follows the active tab of its window.
+ */
 export function PanelRoot(props: { tabId: number | null; createBridge: (tabId: number) => Bridge }): JSX.Element {
-  const { tabId, createBridge } = props;
-  const [onServer, setOnServer] = useState<boolean | null>(tabId === null ? false : null);
-  useEffect(() => (tabId === null ? undefined : watchTabServer(tabId, setOnServer)), [tabId]);
-  const bridge = useMemo(() => (onServer && tabId !== null ? createBridge(tabId) : null), [onServer, tabId, createBridge]);
+  const { createBridge } = props;
+  // undefined: the general panel has not found its tab yet; null: there is none
+  const [tabId, setTabId] = useState<number | null | undefined>(props.tabId ?? undefined);
+  useEffect(() => (props.tabId === null ? watchActiveTab(setTabId) : setTabId(props.tabId)), [props.tabId]);
+  // The answer belongs to one tab: after a switch, the old tab's answer must not open Qommit for the new one.
+  const [server, setServer] = useState<{ tabId: number | null; onServer: boolean } | null>(null);
+  useEffect(() => {
+    if (tabId === undefined) return undefined;
+    if (tabId === null) {
+      setServer({ tabId: null, onServer: false });
+      return undefined;
+    }
+    return watchTabServer(tabId, (onServer) => setServer({ tabId, onServer }));
+  }, [tabId]);
+  const onServer = server !== null && server.tabId === tabId ? server.onServer : null;
+  const bridge = useMemo(() => (onServer && typeof tabId === "number" ? createBridge(tabId) : null), [onServer, tabId, createBridge]);
   if (onServer === null) return <main class="panel" />; // still checking: no flash of the hint
-  return <App bridge={bridge} />;
+  return <App key={tabId ?? "none"} bridge={bridge} />;
 }
 
 export function App(props: { bridge: Bridge | null }): JSX.Element {

@@ -23,6 +23,17 @@ test("wireSidePanel: action click opens the panel, tab updates set the tab's pan
   expect(fake.panelOptions).toEqual([{ tabId: 3, path: "panel.html?tabId=3", enabled: true }]);
 });
 
+test("wireSidePanel: a new tab gets its own panel as soon as it is created, before it loads", async () => {
+  const fake = installFakeChrome();
+  wireSidePanel();
+  await flush();
+  fake.panelOptions.length = 0;
+  fake.emitTabCreated({ id: 4, windowId: 1 });
+  fake.emitTabCreated({ windowId: 1 }); // no id: skipped
+  await flush();
+  expect(fake.panelOptions).toEqual([{ tabId: 4, path: "panel.html?tabId=4", enabled: true }]);
+});
+
 test("wireSidePanel at start: the action opens the panel and tabs that are already open get their panel", async () => {
   const fake = installFakeChrome();
   fake.tabs = [{ id: 1, url: "https://qlik.example.com/qs/sense/app/a" }, { id: 2, url: "https://x.example.com/" }, { url: "https://noid.example.com/" }];
