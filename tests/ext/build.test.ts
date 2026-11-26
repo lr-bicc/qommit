@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 test("build writes a loadable extension", () => {
+  const sourceVersion = (JSON.parse(readFileSync("src/ext/manifest.json", "utf8")) as { version: string }).version;
+  expect(sourceVersion).toMatch(/^\d+(\.\d+){0,3}$/);
   const out = mkdtempSync(join(tmpdir(), "qommit-ext-"));
   execFileSync("node", ["scripts/build-ext.mjs", out], { stdio: "pipe" });
   for (const f of ["manifest.json", "sw.js", "content.js", "panel.html", "panel.js", "options.html", "options.js", "diff.html", "diff.js"]) {
@@ -12,7 +14,7 @@ test("build writes a loadable extension", () => {
   expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toEqual({
     manifest_version: 3,
     name: "Qommit",
-    version: "0.1.2",
+    version: sourceVersion,
     description: "Version control for Qlik Sense apps with GitHub.",
     minimum_chrome_version: "116",
     permissions: ["storage", "scripting", "sidePanel"],

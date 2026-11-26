@@ -46,8 +46,9 @@ You need a GitHub token and a GitHub organization. Qommit stores them only in yo
 **Data usage:**
 
 - Data type collected: Authentication information (the GitHub token).
+- Data type collected: Website content (the content of the user's Qlik Sense apps: scripts, sheets and objects). It is sent only to the GitHub organization the user configured, to store versions there.
 - The token is stored only locally in the browser (`chrome.storage.local`) and sent only to GitHub.
-- Not collected: personal communications, health, financial, location, web history, user activity, website content for the publisher.
+- Not collected: personal communications, health, financial, location, web history, user activity.
 - Certifications: the data is not sold, not used for unrelated purposes, and not used for creditworthiness or lending.
 
 ## Screenshots

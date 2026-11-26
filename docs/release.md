@@ -1,5 +1,14 @@
 # Releasing Qommit
 
+## Once, before v1.0.0
+
+Do these first. The release steps below assume them for v1.0.0.
+
+1. Make the repository public: Settings, General, Danger Zone, Change visibility. The full history becomes public.
+2. Put the privacy page on the `gh-pages` branch (see below).
+3. Turn on GitHub Pages: Settings, Pages, Source "Deploy from a branch", branch `gh-pages`, folder `/ (root)`.
+4. Open https://lr-bicc.github.io/qommit/ and check that the page loads.
+
 ## Each release
 
 1. Raise `version` in `src/ext/manifest.json` (for v1.0.0: `1.0.0`). It has 1 to 4 integers, and each store upload needs a higher version than the last.
@@ -15,12 +24,17 @@
 4. Wait for the release workflow in GitHub Actions. It runs the checks, builds the extension and creates the GitHub release with `qommit-<version>.zip`.
 5. Download the zip from the release and upload it in the Chrome Web Store Developer Dashboard. Enter the texts from `store/listing.md` and submit.
 
-## Once, before v1.0.0
+## If the workflow stops
 
-1. Make the repository public: Settings, General, Danger Zone, Change visibility. The full history becomes public.
-2. Put the privacy page on the `gh-pages` branch (see below).
-3. Turn on GitHub Pages: Settings, Pages, Source "Deploy from a branch", branch `gh-pages`, folder `/ (root)`.
-4. Open https://lr-bicc.github.io/qommit/ and check that the page loads.
+Delete the tag on GitHub and locally, delete the GitHub release if one was created, fix the problem in a pull request, and tag again:
+
+```
+git push --delete origin v1.0.0
+git tag -d v1.0.0
+gh release delete v1.0.0 --yes
+```
+
+Run the last line only if a release exists. Then merge the fix into `main`, pull, and repeat the tag steps above.
 
 ## The privacy page on gh-pages
 
@@ -51,13 +65,18 @@ git push origin gh-pages
 Later changes:
 
 ```
+git fetch origin
 git worktree add ../qommit-pages gh-pages
-git -C ../qommit-pages checkout main -- site/index.html
+git -C ../qommit-pages checkout origin/main -- site/index.html
 git -C ../qommit-pages mv -f site/index.html index.html
 git -C ../qommit-pages commit -am "Update privacy page"
 git push origin gh-pages
 git worktree remove ../qommit-pages
 ```
+
+## After store approval
+
+Put the store link into `README.md`, in place of the sentence "Install Qommit from the Chrome Web Store.", and merge it through a pull request.
 
 ## Switching from the unpacked version
 
