@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 280" width="440" height="280">
+  <rect width="440" height="280" fill="#FFFFFF"/>
+  <g transform="translate(28 76)">
+    <rect width="128" height="128" rx="28" fill="#0F6E56"/>
+    <circle cx="58" cy="58" r="29" fill="none" stroke="#FFFFFF" stroke-width="14"/>
+    <line x1="79" y1="79" x2="97" y2="97" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="100" cy="100" r="12" fill="#9FE1CB"/>
+  </g>
+  <text x="176" y="128" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="44" font-weight="700" fill="#04342C">Qommit</text>
+  <text x="176" y="160" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="15" fill="#04342C">Version control for</text>
+  <text x="176" y="182" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="15" fill="#04342C">Qlik Sense apps with GitHub</text>
+</svg>

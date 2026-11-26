@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qommit privacy policy</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #1f2933; background: #fff; }
+  h1 { color: #0f6e56; }
+  h2 { margin-top: 2rem; font-size: 1.15rem; }
+  code { background: #eef2f1; padding: 0.1em 0.35em; border-radius: 3px; }
+  a { color: #0f6e56; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e4e7eb; background: #14181a; }
+    h1, a { color: #9fe1cb; }
+    code { background: #243038; }
+  }
+</style>
+</head>
+<body>
+<h1>Qommit privacy policy</h1>
+<p>Qommit is a Chrome extension that versions Qlik Sense apps in GitHub. Last updated: 2026-11-26.</p>
+
+<h2>What Qommit collects</h2>
+<p>Qommit does not collect any data for its publisher. There is no Qommit server, no analytics, no tracking, and no third-party service. Nothing is sold or shared.</p>
+
+<h2>What is stored, and where</h2>
+<p>These settings are stored only in <code>chrome.storage.local</code> in your browser:</p>
+<ul>
+  <li>your GitHub token,</li>
+  <li>your GitHub organization and repository prefix,</li>
+  <li>the list of Qlik Sense servers you configured,</li>
+  <li>for each Qlik Sense app you linked: the repository, the branch, the app id and the last synced commit, and which apps you chose not to link (key <code>unlinked:&lt;app&gt;</code>).</li>
+</ul>
+<p>Qommit also keeps short-lived working data (the journal of a running update and the id of the diff window) in <code>chrome.storage.session</code>. Chrome deletes it when the browser closes.</p>
+
+<h2>Where data is sent</h2>
+<ul>
+  <li><strong>GitHub.</strong> The content of your Qlik Sense apps (commits, history, tags) is sent to and read from the GitHub organization you configured, through <code>api.github.com</code>. Downloads of a repository snapshot are redirected by GitHub to <code>codeload.github.com</code>. The token is sent only to GitHub, to authenticate these requests.</li>
+  <li><strong>Your Qlik Sense servers.</strong> Qommit reads and updates apps on the servers you configured. Chrome asks you to allow access to each server when you add it.</li>
+</ul>
+<p>Qommit contacts no other host.</p>
+
+<h2>Removing your data</h2>
+<p>Removing the extension deletes everything it stored in your browser. You can change the token and the server list in the extension options. Content already committed to GitHub stays in your repositories; manage it there.</p>
+
+<h2>Contact</h2>
+<p>Questions or concerns: <a href="https://github.com/lr-bicc/qommit/issues">https://github.com/lr-bicc/qommit/issues</a></p>
+</body>
+</html>

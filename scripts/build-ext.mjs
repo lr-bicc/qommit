@@ -3,7 +3,7 @@
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, cp, mkdir } from "node:fs/promises";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = join(root, "src", "ext");
@@ -36,3 +36,4 @@ await copyFile(join(src, "panel", "panel.html"), join(outDir, "panel.html"));
 await copyFile(join(src, "panel", "panel.css"), join(outDir, "panel.css"));
 await copyFile(join(src, "options", "options.html"), join(outDir, "options.html"));
 await copyFile(join(src, "diffwin", "diff.html"), join(outDir, "diff.html"));
+await cp(join(src, "icons"), join(outDir, "icons"), { recursive: true });
