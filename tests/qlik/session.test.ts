@@ -97,7 +97,7 @@ describe("openSession", () => {
   });
 
   test("takes the user from OnAuthenticationInformation", async () => {
-    const m = makeCreate({ auth: { userId: "r.vasilev", userDirectory: "LR" } });
+    const m = makeCreate({ auth: { userId: "r.vasilev", userDirectory: "DOMAIN" } });
     const s = await openSession(loc, { fetch: fakeFetch(new TypeError("x")), create: m.create });
     expect(s.user).toBe("r.vasilev");
   });

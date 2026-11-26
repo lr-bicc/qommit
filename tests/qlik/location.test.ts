@@ -2,8 +2,8 @@ import { appUrl, engineUrl, parseQlikUrl } from "../../src/qlik/location";
 
 test("parses app and hub urls with and without a virtual proxy", () => {
   const id = "0a15fa01-ba63-45e6-aa3d-e060205e8344";
-  expect(parseQlikUrl(`https://lr-analytics-test.lrworld.com/qs/sense/app/${id}/sheet/abc/state/analysis`))
-    .toEqual({ origin: "https://lr-analytics-test.lrworld.com", prefix: "/qs", appId: id });
+  expect(parseQlikUrl(`https://qlik.example.com/qs/sense/app/${id}/sheet/abc/state/analysis`))
+    .toEqual({ origin: "https://qlik.example.com", prefix: "/qs", appId: id });
   expect(parseQlikUrl(`https://host/sense/app/${id}`)).toEqual({ origin: "https://host", prefix: "", appId: id });
   expect(parseQlikUrl("https://host/qs/hub/stream/x")).toEqual({ origin: "https://host", prefix: "/qs", appId: null });
   expect(parseQlikUrl("https://host/qs/qmc/apps")).toBeNull();

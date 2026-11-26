@@ -56,9 +56,9 @@ export interface SpikeReport {
 }
 
 export interface AppLocation {
-  /** e.g. "lr-analytics-test.lrworld.com" */
+  /** e.g. "qlik.example.com" */
   host: string;
-  /** e.g. "https://lr-analytics-test.lrworld.com" */
+  /** e.g. "https://qlik.example.com" */
   origin: string;
   /** Virtual proxy prefix including leading slash, e.g. "/qs", or "" for the default proxy. */
   prefix: string;

@@ -1,12 +1,12 @@
 # Spike-Ergebnisse
 
-**Stand:** 2026-11-13 · **Server:** `lr-analytics-test.lrworld.com`, Virtual Proxy `/qs` · **Benutzer:** `LR\r.vasilev`
+**Stand:** 2026-11-13 · **Server:** `qlik.example.com`, Virtual Proxy `/qs` · **Benutzer:** `DOMAIN\user`
 
 Grundlage sind fünf Berichte der Spike-Extension (`docs/superpowers/spike/RUNBOOK.md`) vom 2026-11-13 und die Notiz zur Sichtbarkeit des Link-Objekts („nirgends sichtbar“). Alle fünf Läufe liefen vollständig durch, keine Probe lief in ein Timeout.
 
 | Bericht | App | Was geprüft wurde |
 |---|---|---|
-| A | Kopie 1 der veröffentlichten „Supply Chain Performance“ (`0a15fa01…`), ohne `DoSave` | Grundlauf |
+| A | Kopie 1 der veröffentlichten „Sales Overview“ (`0a15fa01…`), ohne `DoSave` | Grundlauf |
 | A2 | Duplikat von Kopie 1 (`6b4121db…`), ohne `DoSave` | Bleibt das Link-Objekt ohne `DoSave` erhalten? |
 | B1 | Kopie 1 erneut, mit `DoSave` | Bleiben die Daten beim Speichern erhalten? |
 | B | weiteres Duplikat von Kopie 1 (`deae9888…`) | Wird das Link-Objekt nach dem Speichern mitkopiert? |
@@ -19,7 +19,7 @@ Grundlage sind fünf Berichte der Spike-Extension (`docs/superpowers/spike/RUNBO
 | 1 | WebSocket aus dem Content Script | **Ja.** | P1 in allen fünf Läufen: Sitzung `SESSION_ATTACHED`, `OpenDoc` erfolgreich. |
 | 2 | Objekte mit vorgegebener `qId` anlegen | **Ja**, in derselben und in einer neuen App, für Dimension, Measure, Master-Visualisierung, Sheet, Story und Variable. | P2 (A, A2, B1, B) und P9 (alle Läufe): `idKept: true` für alle sechs Typen. |
 | 3 | Link-Objekt: mitkopiert, ohne `DoSave` erhalten, unsichtbar | **Ja, alle drei.** | A2: `existedBefore: true` in einem Duplikat, das vor jedem `DoSave` entstand. B: ebenso nach dem Speichern. Notiz: nirgends sichtbar. |
-| 4 | Stabiles Lesen; Übereinstimmung mit dem Referenz-Repo | **Ja**, mit zwei erklärten Abweichungen (siehe unten). | P4: 208 Objekte zweimal gelesen, 0 Abweichungen, in allen Läufen. Vergleich der 422 Datei-Prüfsummen mit `origin/main` von `lr-bicc/supply-chain-performance`. |
+| 4 | Stabiles Lesen; Übereinstimmung mit dem Referenz-Repo | **Ja**, mit zwei erklärten Abweichungen (siehe unten). | P4: 208 Objekte zweimal gelesen, 0 Abweichungen, in allen Läufen. Vergleich der 422 Datei-Prüfsummen mit `origin/main` von `lr-bicc/sales-overview`. |
 | 5 | Statische Dateien lesen, hochladen, löschen | **Ja**, auch in der veröffentlichten App. | P5: 21 Dateien gelistet, Download 200, Upload 201, Löschen 204. |
 | 6 | Story mit Snapshots in eine neue App ohne Daten | **Offen.** Die Test-App hat keine Story. | P6: `storyCount: 0`. Bestätigt ist nur, dass sich eine Story mit vorgegebener ID anlegen lässt (P9). |
 | 7 | Daten bleiben bei `DoSave` erhalten | **Ja** nach Objektänderungen. Nach einer Skriptänderung ist es nicht geprüft. | P7 (B1, C): 8 Tabellen und 4.092.937 Zeilen vor und nach `DoSave`. Die gespeicherte Kopie brachte ihre Daten über „Publish and replace“ in die veröffentlichte App mit. |
