@@ -70,21 +70,20 @@ test("contents are downloaded once", async () => {
   expect(github.blobReads()).toBe(afterFirst);
 });
 
-test("the preload fetches only the first 100 entries; the rest is lazy", async () => {
+test("every entry gets its title, read in groups of 100; their contents need no second download", async () => {
   const { ports, github, c1 } = setup();
-  const changes = Array.from({ length: 105 }, (_, i) => ({ path: `objects/measures/m${i}.json`, content: JSON.stringify({ qMetaDef: { title: `M${i}` } }) }));
+  const changes = Array.from({ length: 205 }, (_, i) => ({ path: `objects/measures/m${i}.json`, content: JSON.stringify({ qMetaDef: { title: `M${i}` } }) }));
   const c2 = await github.commitFiles(REPO, { branch: "main", parentSha: c1, message: "many", changes });
   const calls: number[] = [];
   const original = github.readBlobs.bind(github);
   github.readBlobs = async (repo, items) => { calls.push(items.length); return original(repo, items); };
   const d = await openDiff(ports, REPO, { kind: "commit", sha: c1 }, { kind: "commit", sha: c2 });
-  expect(calls).toEqual([100]);
-  expect(d.entries).toHaveLength(105);
-  const titled = d.entries.filter((e) => e.title.startsWith("M"));
-  expect(titled).toHaveLength(100);
-  expect(d.entries.filter((e) => e.title.endsWith(".json"))).toHaveLength(5);
-  await d.contents(d.entries.find((e) => e.title.endsWith(".json"))!.path);
-  expect(calls).toEqual([100, 1]);
+  expect(calls).toEqual([100, 100, 5]);
+  expect(d.entries).toHaveLength(205);
+  expect(d.entries.filter((e) => /^M\d+$/.test(e.title))).toHaveLength(205);
+  // An added entry has only the after side, which the title loading already read.
+  expect(await d.contents("objects/measures/m204.json")).toEqual({ before: null, after: JSON.stringify({ qMetaDef: { title: "M204" } }) });
+  expect(calls).toEqual([100, 100, 5]);
 });
 
 test("equal sides give no entries and no download", async () => {
